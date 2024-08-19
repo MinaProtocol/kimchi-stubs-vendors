@@ -1,157 +1,157 @@
-use ark_std::{
-    io::{Result as IoResult, Write},
-    vec::Vec,
-};
-
-use ark_ff::{
-    bytes::ToBytes,
-    fields::{BitIteratorBE, Field, Fp2},
-};
-
-use num_traits::{One, Zero};
+use ark_ff::{BitIteratorBE, Field, Fp2};
+use ark_serialize::*;
+use ark_std::{vec::Vec, One};
 
 use crate::{
-    bls12::{Bls12Parameters, TwistType},
-    models::SWModelParameters,
-    short_weierstrass_jacobian::{GroupAffine, GroupProjective},
-    AffineCurve,
+    bls12::{Bls12Config, TwistType},
+    models::short_weierstrass::SWCurveConfig,
+    short_weierstrass::{Affine, Projective},
+    AffineRepr, CurveGroup,
 };
 
-pub type G2Affine<P> = GroupAffine<<P as Bls12Parameters>::G2Parameters>;
-pub type G2Projective<P> = GroupProjective<<P as Bls12Parameters>::G2Parameters>;
+pub type G2Affine<P> = Affine<<P as Bls12Config>::G2Config>;
+pub type G2Projective<P> = Projective<<P as Bls12Config>::G2Config>;
 
-#[derive(Derivative)]
+#[derive(Derivative, CanonicalSerialize, CanonicalDeserialize)]
 #[derivative(
-    Clone(bound = "P: Bls12Parameters"),
-    Debug(bound = "P: Bls12Parameters"),
-    PartialEq(bound = "P: Bls12Parameters"),
-    Eq(bound = "P: Bls12Parameters")
+    Clone(bound = "P: Bls12Config"),
+    Debug(bound = "P: Bls12Config"),
+    PartialEq(bound = "P: Bls12Config"),
+    Eq(bound = "P: Bls12Config")
 )]
-pub struct G2Prepared<P: Bls12Parameters> {
+pub struct G2Prepared<P: Bls12Config> {
     // Stores the coefficients of the line evaluations as calculated in
     // https://eprint.iacr.org/2013/722.pdf
-    pub ell_coeffs: Vec<EllCoeff<Fp2<P::Fp2Params>>>,
+    pub ell_coeffs: Vec<EllCoeff<P>>,
     pub infinity: bool,
 }
 
-pub(crate) type EllCoeff<F> = (F, F, F);
+pub(crate) type EllCoeff<P> = (
+    Fp2<<P as Bls12Config>::Fp2Config>,
+    Fp2<<P as Bls12Config>::Fp2Config>,
+    Fp2<<P as Bls12Config>::Fp2Config>,
+);
 
 #[derive(Derivative)]
 #[derivative(
-    Clone(bound = "P: Bls12Parameters"),
-    Copy(bound = "P: Bls12Parameters"),
-    Debug(bound = "P: Bls12Parameters")
+    Clone(bound = "P: Bls12Config"),
+    Copy(bound = "P: Bls12Config"),
+    Debug(bound = "P: Bls12Config")
 )]
-struct G2HomProjective<P: Bls12Parameters> {
-    x: Fp2<P::Fp2Params>,
-    y: Fp2<P::Fp2Params>,
-    z: Fp2<P::Fp2Params>,
+struct G2HomProjective<P: Bls12Config> {
+    x: Fp2<P::Fp2Config>,
+    y: Fp2<P::Fp2Config>,
+    z: Fp2<P::Fp2Config>,
 }
 
-impl<P: Bls12Parameters> Default for G2Prepared<P> {
+impl<P: Bls12Config> Default for G2Prepared<P> {
     fn default() -> Self {
-        Self::from(G2Affine::<P>::prime_subgroup_generator())
+        Self::from(G2Affine::<P>::generator())
     }
 }
 
-impl<P: Bls12Parameters> ToBytes for G2Prepared<P> {
-    fn write<W: Write>(&self, mut writer: W) -> IoResult<()> {
-        for coeff in &self.ell_coeffs {
-            coeff.0.write(&mut writer)?;
-            coeff.1.write(&mut writer)?;
-            coeff.2.write(&mut writer)?;
-        }
-        self.infinity.write(writer)
-    }
-}
-
-impl<P: Bls12Parameters> From<G2Affine<P>> for G2Prepared<P> {
+impl<P: Bls12Config> From<G2Affine<P>> for G2Prepared<P> {
     fn from(q: G2Affine<P>) -> Self {
         let two_inv = P::Fp::one().double().inverse().unwrap();
-        if q.is_zero() {
-            return Self {
-                ell_coeffs: vec![],
-                infinity: true,
-            };
-        }
-
-        let mut ell_coeffs = vec![];
-        let mut r = G2HomProjective {
-            x: q.x,
-            y: q.y,
-            z: Fp2::one(),
+        let zero = G2Prepared {
+            ell_coeffs: vec![],
+            infinity: true,
         };
+        q.xy().map_or(zero, |(&q_x, &q_y)| {
+            let mut ell_coeffs = vec![];
+            let mut r = G2HomProjective::<P> {
+                x: q_x,
+                y: q_y,
+                z: Fp2::one(),
+            };
 
-        for i in BitIteratorBE::new(P::X).skip(1) {
-            ell_coeffs.push(doubling_step::<P>(&mut r, &two_inv));
+            for i in BitIteratorBE::new(P::X).skip(1) {
+                ell_coeffs.push(r.double_in_place(&two_inv));
 
-            if i {
-                ell_coeffs.push(addition_step::<P>(&mut r, &q));
+                if i {
+                    ell_coeffs.push(r.add_in_place(&q));
+                }
             }
-        }
 
-        Self {
-            ell_coeffs,
-            infinity: false,
-        }
+            Self {
+                ell_coeffs,
+                infinity: false,
+            }
+        })
     }
 }
-impl<P: Bls12Parameters> G2Prepared<P> {
+
+impl<P: Bls12Config> From<G2Projective<P>> for G2Prepared<P> {
+    fn from(q: G2Projective<P>) -> Self {
+        q.into_affine().into()
+    }
+}
+
+impl<'a, P: Bls12Config> From<&'a G2Affine<P>> for G2Prepared<P> {
+    fn from(other: &'a G2Affine<P>) -> Self {
+        (*other).into()
+    }
+}
+
+impl<'a, P: Bls12Config> From<&'a G2Projective<P>> for G2Prepared<P> {
+    fn from(q: &'a G2Projective<P>) -> Self {
+        q.into_affine().into()
+    }
+}
+
+impl<P: Bls12Config> G2Prepared<P> {
     pub fn is_zero(&self) -> bool {
         self.infinity
     }
 }
 
-fn doubling_step<B: Bls12Parameters>(
-    r: &mut G2HomProjective<B>,
-    two_inv: &B::Fp,
-) -> EllCoeff<Fp2<B::Fp2Params>> {
-    // Formula for line function when working with
-    // homogeneous projective coordinates.
+impl<P: Bls12Config> G2HomProjective<P> {
+    fn double_in_place(&mut self, two_inv: &P::Fp) -> EllCoeff<P> {
+        // Formula for line function when working with
+        // homogeneous projective coordinates.
 
-    let mut a = r.x * &r.y;
-    a.mul_assign_by_fp(two_inv);
-    let b = r.y.square();
-    let c = r.z.square();
-    let e = B::G2Parameters::COEFF_B * &(c.double() + &c);
-    let f = e.double() + &e;
-    let mut g = b + &f;
-    g.mul_assign_by_fp(two_inv);
-    let h = (r.y + &r.z).square() - &(b + &c);
-    let i = e - &b;
-    let j = r.x.square();
-    let e_square = e.square();
+        let mut a = self.x * &self.y;
+        a.mul_assign_by_fp(two_inv);
+        let b = self.y.square();
+        let c = self.z.square();
+        let e = P::G2Config::COEFF_B * &(c.double() + &c);
+        let f = e.double() + &e;
+        let mut g = b + &f;
+        g.mul_assign_by_fp(two_inv);
+        let h = (self.y + &self.z).square() - &(b + &c);
+        let i = e - &b;
+        let j = self.x.square();
+        let e_square = e.square();
 
-    r.x = a * &(b - &f);
-    r.y = g.square() - &(e_square.double() + &e_square);
-    r.z = b * &h;
-    match B::TWIST_TYPE {
-        TwistType::M => (i, j.double() + &j, -h),
-        TwistType::D => (-h, j.double() + &j, i),
+        self.x = a * &(b - &f);
+        self.y = g.square() - &(e_square.double() + &e_square);
+        self.z = b * &h;
+        match P::TWIST_TYPE {
+            TwistType::M => (i, j.double() + &j, -h),
+            TwistType::D => (-h, j.double() + &j, i),
+        }
     }
-}
 
-fn addition_step<B: Bls12Parameters>(
-    r: &mut G2HomProjective<B>,
-    q: &G2Affine<B>,
-) -> EllCoeff<Fp2<B::Fp2Params>> {
-    // Formula for line function when working with
-    // homogeneous projective coordinates.
-    let theta = r.y - &(q.y * &r.z);
-    let lambda = r.x - &(q.x * &r.z);
-    let c = theta.square();
-    let d = lambda.square();
-    let e = lambda * &d;
-    let f = r.z * &c;
-    let g = r.x * &d;
-    let h = e + &f - &g.double();
-    r.x = lambda * &h;
-    r.y = theta * &(g - &h) - &(e * &r.y);
-    r.z *= &e;
-    let j = theta * &q.x - &(lambda * &q.y);
+    fn add_in_place(&mut self, q: &G2Affine<P>) -> EllCoeff<P> {
+        let (&qx, &qy) = q.xy().unwrap();
+        // Formula for line function when working with
+        // homogeneous projective coordinates.
+        let theta = self.y - &(qy * &self.z);
+        let lambda = self.x - &(qx * &self.z);
+        let c = theta.square();
+        let d = lambda.square();
+        let e = lambda * &d;
+        let f = self.z * &c;
+        let g = self.x * &d;
+        let h = e + &f - &g.double();
+        self.x = lambda * &h;
+        self.y = theta * &(g - &h) - &(e * &self.y);
+        self.z *= &e;
+        let j = theta * &qx - &(lambda * &qy);
 
-    match B::TWIST_TYPE {
-        TwistType::M => (j, -theta, lambda),
-        TwistType::D => (lambda, -theta, j),
+        match P::TWIST_TYPE {
+            TwistType::M => (j, -theta, lambda),
+            TwistType::D => (lambda, -theta, j),
+        }
     }
 }

@@ -21,7 +21,8 @@
         allocator_api,
         slice_ptr_get,
         nonnull_slice_from_raw_parts,
-        maybe_uninit_array_assume_init
+        maybe_uninit_array_assume_init,
+        build_hasher_simple_hash_one
     )
 )]
 #![allow(
@@ -30,7 +31,9 @@
     clippy::must_use_candidate,
     clippy::option_if_let_else,
     clippy::redundant_else,
-    clippy::manual_map
+    clippy::manual_map,
+    clippy::missing_safety_doc,
+    clippy::missing_errors_doc
 )]
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
@@ -114,6 +117,39 @@ pub mod hash_set {
 pub use crate::map::HashMap;
 pub use crate::set::HashSet;
 
+/// Key equivalence trait.
+///
+/// This trait defines the function used to compare the input value with the
+/// map keys (or set values) during a lookup operation such as [`HashMap::get`]
+/// or [`HashSet::contains`].
+/// It is provided with a blanket implementation based on the
+/// [`Borrow`](core::borrow::Borrow) trait.
+///
+/// # Correctness
+///
+/// Equivalent values must hash to the same value.
+pub trait Equivalent<K: ?Sized> {
+    /// Checks if this value is equivalent to the given key.
+    ///
+    /// Returns `true` if both values are equivalent, and `false` otherwise.
+    ///
+    /// # Correctness
+    ///
+    /// When this function returns `true`, both `self` and `key` must hash to
+    /// the same value.
+    fn equivalent(&self, key: &K) -> bool;
+}
+
+impl<Q: ?Sized, K: ?Sized> Equivalent<K> for Q
+where
+    Q: Eq,
+    K: core::borrow::Borrow<Q>,
+{
+    fn equivalent(&self, key: &K) -> bool {
+        self == key.borrow()
+    }
+}
+
 /// The error type for `try_reserve` methods.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum TryReserveError {
@@ -126,20 +162,6 @@ pub enum TryReserveError {
         /// The layout of the allocation request that failed.
         layout: alloc::alloc::Layout,
     },
-}
-
-/// The error type for [`RawTable::get_each_mut`](crate::raw::RawTable::get_each_mut),
-/// [`HashMap::get_each_mut`], and [`HashMap::get_each_key_value_mut`].
-#[cfg(feature = "nightly")]
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum UnavailableMutError {
-    /// The requested entry is not present in the table.
-    Absent,
-    /// The requested entry is present, but a mutable reference to it was already created and
-    /// returned from this call to `get_each_mut` or `get_each_key_value_mut`.
-    ///
-    /// Includes the index of the existing mutable reference in the returned array.
-    Duplicate(usize),
 }
 
 /// Wrapper around `Bump` which allows it to be used as an allocator for

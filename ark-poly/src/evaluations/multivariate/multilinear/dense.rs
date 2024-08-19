@@ -2,13 +2,15 @@
 
 use crate::evaluations::multivariate::multilinear::{swap_bits, MultilinearExtension};
 use ark_ff::{Field, Zero};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
-use ark_std::fmt;
-use ark_std::fmt::Formatter;
-use ark_std::ops::{Add, AddAssign, Index, Neg, Sub, SubAssign};
-use ark_std::rand::Rng;
-use ark_std::slice::{Iter, IterMut};
-use ark_std::vec::Vec;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::{
+    fmt,
+    fmt::Formatter,
+    ops::{Add, AddAssign, Index, Neg, Sub, SubAssign},
+    rand::Rng,
+    slice::{Iter, IterMut},
+    vec::Vec,
+};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
@@ -23,13 +25,15 @@ pub struct DenseMultilinearExtension<F: Field> {
 
 impl<F: Field> DenseMultilinearExtension<F> {
     /// Construct a new polynomial from a list of evaluations where the index
-    /// represents a point in {0,1}^`num_vars` in little endian form. For example, `0b1011` represents `P(1,1,0,1)`
+    /// represents a point in {0,1}^`num_vars` in little endian form. For
+    /// example, `0b1011` represents `P(1,1,0,1)`
     pub fn from_evaluations_slice(num_vars: usize, evaluations: &[F]) -> Self {
         Self::from_evaluations_vec(num_vars, evaluations.to_vec())
     }
 
     /// Construct a new polynomial from a list of evaluations where the index
-    /// represents a point in {0,1}^`num_vars` in little endian form. For example, `0b1011` represents `P(1,1,0,1)`
+    /// represents a point in {0,1}^`num_vars` in little endian form. For
+    /// example, `0b1011` represents `P(1,1,0,1)`
     pub fn from_evaluations_vec(num_vars: usize, evaluations: Vec<F>) -> Self {
         // assert that the number of variables matches the size of evaluations
         assert_eq!(
@@ -43,22 +47,20 @@ impl<F: Field> DenseMultilinearExtension<F> {
             evaluations,
         }
     }
-    /// Relabel the point inplace by switching `k` scalars from position `a` to position `b`, and from position `b` to position `a` in vector.
+    /// Relabel the point in place by switching `k` scalars from position `a` to
+    /// position `b`, and from position `b` to position `a` in vector.
     ///
     /// This function turns `P(x_1,...,x_a,...,x_{a+k - 1},...,x_b,...,x_{b+k - 1},...,x_n)`
     /// to `P(x_1,...,x_b,...,x_{b+k - 1},...,x_a,...,x_{a+k - 1},...,x_n)`
-    pub fn relabel_inplace(&mut self, mut a: usize, mut b: usize, k: usize) {
+    pub fn relabel_in_place(&mut self, mut a: usize, mut b: usize, k: usize) {
         // enforce order of a and b
         if a > b {
             ark_std::mem::swap(&mut a, &mut b);
         }
-        assert!(
-            a + k < self.num_vars && b + k < self.num_vars,
-            "invalid relabel argument"
-        );
         if a == b || k == 0 {
             return;
         }
+        assert!(b + k <= self.num_vars, "invalid relabel argument");
         assert!(a + k <= b, "overlapped swap window is not allowed");
         for i in 0..self.evaluations.len() {
             let j = swap_bits(i, a, b, k);
@@ -101,7 +103,7 @@ impl<F: Field> MultilinearExtension<F> for DenseMultilinearExtension<F> {
 
     fn relabel(&self, a: usize, b: usize, k: usize) -> Self {
         let mut copied = self.clone();
-        copied.relabel_inplace(a, b, k);
+        copied.relabel_in_place(a, b, k);
         copied
     }
 
@@ -117,7 +119,9 @@ impl<F: Field> MultilinearExtension<F> for DenseMultilinearExtension<F> {
         for i in 1..dim + 1 {
             let r = partial_point[i - 1];
             for b in 0..(1 << (nv - i)) {
-                poly[b] = poly[b << 1] * (F::one() - r) + poly[(b << 1) + 1] * r;
+                let left = poly[b << 1];
+                let right = poly[(b << 1) + 1];
+                poly[b] = left + r * (right - left);
             }
         }
         Self::from_evaluations_slice(nv - dim, &poly[..(1 << (nv - dim))])
@@ -133,7 +137,8 @@ impl<F: Field> Index<usize> for DenseMultilinearExtension<F> {
 
     /// Returns the evaluation of the polynomial at a point represented by index.
     ///
-    /// Index represents a vector in {0,1}^`num_vars` in little endian form. For example, `0b1011` represents `P(1,1,0,1)`
+    /// Index represents a vector in {0,1}^`num_vars` in little endian form. For
+    /// example, `0b1011` represents `P(1,1,0,1)`
     ///
     /// For dense multilinear polynomial, `index` takes constant time.
     fn index(&self, index: usize) -> &Self::Output {
@@ -176,15 +181,13 @@ impl<F: Field> AddAssign for DenseMultilinearExtension<F> {
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<&'a DenseMultilinearExtension<F>>
-    for DenseMultilinearExtension<F>
-{
+impl<'a, F: Field> AddAssign<&'a DenseMultilinearExtension<F>> for DenseMultilinearExtension<F> {
     fn add_assign(&mut self, other: &'a DenseMultilinearExtension<F>) {
         *self = &*self + other;
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<(F, &'a DenseMultilinearExtension<F>)>
+impl<'a, F: Field> AddAssign<(F, &'a DenseMultilinearExtension<F>)>
     for DenseMultilinearExtension<F>
 {
     fn add_assign(&mut self, (f, other): (F, &'a DenseMultilinearExtension<F>)) {
@@ -229,9 +232,7 @@ impl<F: Field> SubAssign for DenseMultilinearExtension<F> {
     }
 }
 
-impl<'a, 'b, F: Field> SubAssign<&'a DenseMultilinearExtension<F>>
-    for DenseMultilinearExtension<F>
-{
+impl<'a, F: Field> SubAssign<&'a DenseMultilinearExtension<F>> for DenseMultilinearExtension<F> {
     fn sub_assign(&mut self, other: &'a DenseMultilinearExtension<F>) {
         *self = &*self - other;
     }
@@ -267,12 +268,9 @@ impl<F: Field> Zero for DenseMultilinearExtension<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::DenseMultilinearExtension;
-    use crate::MultilinearExtension;
+    use crate::{DenseMultilinearExtension, MultilinearExtension};
     use ark_ff::{Field, Zero};
-    use ark_std::ops::Neg;
-    use ark_std::vec::Vec;
-    use ark_std::{test_rng, UniformRand};
+    use ark_std::{ops::Neg, test_rng, vec::Vec, UniformRand};
     use ark_test_curves::bls12_381::Fr;
 
     /// utility: evaluate multilinear extension (in form of data array) at a random point
@@ -315,26 +313,30 @@ mod tests {
 
             let expected = poly.evaluate(&point);
 
-            poly.relabel_inplace(2, 2, 1); // should have no effect
+            poly.relabel_in_place(2, 2, 1); // should have no effect
             assert_eq!(expected, poly.evaluate(&point));
 
-            poly.relabel_inplace(3, 4, 1); // should switch 3 and 4
+            poly.relabel_in_place(3, 4, 1); // should switch 3 and 4
             point.swap(3, 4);
             assert_eq!(expected, poly.evaluate(&point));
 
-            poly.relabel_inplace(7, 5, 1);
+            poly.relabel_in_place(7, 5, 1);
             point.swap(7, 5);
             assert_eq!(expected, poly.evaluate(&point));
 
-            poly.relabel_inplace(2, 5, 3);
+            poly.relabel_in_place(2, 5, 3);
             point.swap(2, 5);
             point.swap(3, 6);
             point.swap(4, 7);
             assert_eq!(expected, poly.evaluate(&point));
 
-            poly.relabel_inplace(7, 0, 2);
+            poly.relabel_in_place(7, 0, 2);
             point.swap(0, 7);
             point.swap(1, 8);
+            assert_eq!(expected, poly.evaluate(&point));
+
+            poly.relabel_in_place(0, 9, 1);
+            point.swap(0, 9);
             assert_eq!(expected, poly.evaluate(&point));
         }
     }

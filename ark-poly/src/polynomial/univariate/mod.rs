@@ -1,6 +1,6 @@
 //! Work with sparse and dense polynomials.
 
-use crate::{EvaluationDomain, Evaluations, Polynomial, UVPolynomial};
+use crate::{DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial};
 use ark_ff::{FftField, Field, Zero};
 use ark_std::{borrow::Cow, convert::TryInto, vec::Vec};
 use DenseOrSparsePolynomial::*;
@@ -10,6 +10,9 @@ mod sparse;
 
 pub use dense::DensePolynomial;
 pub use sparse::SparsePolynomial;
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// Represents either a sparse polynomial or a dense one.
 #[derive(Clone)]
@@ -44,9 +47,9 @@ impl<'a, F: Field> From<&'a SparsePolynomial<F>> for DenseOrSparsePolynomial<'a,
     }
 }
 
-impl<'a, F: Field> Into<DensePolynomial<F>> for DenseOrSparsePolynomial<'a, F> {
-    fn into(self) -> DensePolynomial<F> {
-        match self {
+impl<'a, F: Field> From<DenseOrSparsePolynomial<'a, F>> for DensePolynomial<F> {
+    fn from(other: DenseOrSparsePolynomial<'a, F>) -> DensePolynomial<F> {
+        match other {
             DPolynomial(p) => p.into_owned(),
             SPolynomial(p) => p.into_owned().into(),
         }
@@ -147,18 +150,42 @@ impl<'a, F: 'a + FftField> DenseOrSparsePolynomial<'a, F> {
             SPolynomial(Cow::Borrowed(s)) => {
                 let evals = domain.elements().map(|elem| s.evaluate(&elem)).collect();
                 Evaluations::from_vec_and_domain(evals, domain)
-            }
+            },
             SPolynomial(Cow::Owned(s)) => {
                 let evals = domain.elements().map(|elem| s.evaluate(&elem)).collect();
                 Evaluations::from_vec_and_domain(evals, domain)
-            }
+            },
             DPolynomial(Cow::Borrowed(d)) => {
-                Evaluations::from_vec_and_domain(domain.fft(&d.coeffs), domain)
-            }
+                if d.is_zero() {
+                    Evaluations::from_vec_and_domain(vec![F::zero(); domain.size()], domain)
+                } else {
+                    // Reduce the coefficients of the polynomial mod X^domain.size()
+                    let mut chunks = d.coeffs.chunks(domain.size());
+                    let mut reduced = chunks.next().unwrap().to_vec();
+                    for chunk in chunks {
+                        cfg_iter_mut!(reduced).zip(chunk).for_each(|(x, y)| {
+                            *x += y;
+                        });
+                    }
+                    Evaluations::from_vec_and_domain(domain.fft(&reduced), domain)
+                }
+            },
             DPolynomial(Cow::Owned(mut d)) => {
-                domain.fft_in_place(&mut d.coeffs);
-                Evaluations::from_vec_and_domain(d.coeffs, domain)
-            }
+                // Reduce the coefficients of the polynomial mod X^domain.size()
+                if d.is_zero() {
+                    Evaluations::from_vec_and_domain(vec![F::zero(); domain.size()], domain)
+                } else {
+                    let mut chunks = d.coeffs.chunks_mut(domain.size());
+                    let coeffs = chunks.next().unwrap();
+                    for chunk in chunks {
+                        cfg_iter_mut!(coeffs).zip(chunk).for_each(|(x, y)| {
+                            *x += y;
+                        });
+                    }
+                    domain.fft_in_place(&mut d.coeffs);
+                    Evaluations::from_vec_and_domain(d.coeffs, domain)
+                }
+            },
         }
     }
 }

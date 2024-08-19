@@ -1,16 +1,21 @@
 //! multilinear polynomial represented in sparse evaluation form.
 
-use crate::evaluations::multivariate::multilinear::swap_bits;
-use crate::{DenseMultilinearExtension, MultilinearExtension};
+use crate::{
+    evaluations::multivariate::multilinear::swap_bits, DenseMultilinearExtension,
+    MultilinearExtension,
+};
 use ark_ff::{Field, Zero};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read, SerializationError, Write};
-use ark_std::collections::BTreeMap;
-use ark_std::fmt::{Debug, Formatter};
-use ark_std::iter::FromIterator;
-use ark_std::ops::{Add, AddAssign, Index, Neg, Sub, SubAssign};
-use ark_std::rand::Rng;
-use ark_std::vec::Vec;
-use ark_std::{fmt, UniformRand};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::{
+    collections::BTreeMap,
+    fmt,
+    fmt::{Debug, Formatter},
+    iter::FromIterator,
+    ops::{Add, AddAssign, Index, Neg, Sub, SubAssign},
+    rand::Rng,
+    vec::Vec,
+    UniformRand,
+};
 use hashbrown::HashMap;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -47,11 +52,14 @@ impl<F: Field> SparseMultilinearExtension<F> {
         }
     }
 
-    /// Outputs an `l`-variate multilinear extension where value of evaluations are sampled uniformly at random.
-    /// The number of nonzero entries is `num_nonzero_entries` and indices of those nonzero entries are distributed uniformly at random.
+    /// Outputs an `l`-variate multilinear extension where value of evaluations
+    /// are sampled uniformly at random. The number of nonzero entries is
+    /// `num_nonzero_entries` and indices of those nonzero entries are
+    /// distributed uniformly at random.
     ///
-    /// Note that this function uses rejection sampling. As number of nonzero entries approach `2 ^ num_vars`,
-    /// sampling will be very slow due to large number of collisions.
+    /// Note that this function uses rejection sampling. As number of nonzero
+    /// entries approach `2 ^ num_vars`, sampling will be very slow due to
+    /// large number of collisions.
     pub fn rand_with_config<R: Rng>(
         num_vars: usize,
         num_nonzero_entries: usize,
@@ -62,7 +70,7 @@ impl<F: Field> SparseMultilinearExtension<F> {
         let mut map = HashMap::new();
         for _ in 0..num_nonzero_entries {
             let mut index = usize::rand(rng) & ((1 << num_vars) - 1);
-            while let Some(_) = map.get(&index) {
+            while map.get(&index).is_some() {
                 index = usize::rand(rng) & ((1 << num_vars) - 1);
             }
             map.entry(index).or_insert(F::rand(rng));
@@ -94,15 +102,14 @@ impl<F: Field> SparseMultilinearExtension<F> {
 /// utility: precompute f(x) = eq(g,x)
 fn precompute_eq<F: Field>(g: &[F]) -> Vec<F> {
     let dim = g.len();
-    let mut dp = Vec::with_capacity(1 << dim);
-    dp.resize(1 << dim, F::zero());
+    let mut dp = vec![F::zero(); 1 << dim];
     dp[0] = F::one() - g[0];
     dp[1] = g[0];
     for i in 1..dim {
-        let dp_prev = (&dp[0..(1 << i)]).to_vec();
         for b in 0..(1 << i) {
-            dp[b] = dp_prev[b] * (F::one() - g[i]);
-            dp[b + (1 << i)] = dp_prev[b] * g[i];
+            let prev = dp[b];
+            dp[b + (1 << i)] = prev * g[i];
+            dp[b] = prev - dp[b + (1 << i)];
         }
     }
     dp
@@ -115,14 +122,16 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
 
     fn evaluate(&self, point: &[F]) -> Option<F> {
         if point.len() == self.num_vars {
-            Some(self.fix_variables(&point)[0])
+            Some(self.fix_variables(point)[0])
         } else {
             None
         }
     }
 
-    /// Outputs an `l`-variate multilinear extension where value of evaluations are sampled uniformly at random.
-    /// The number of nonzero entries is `sqrt(2^num_vars)` and indices of those nonzero entries are distributed uniformly at random.
+    /// Outputs an `l`-variate multilinear extension where value of evaluations
+    /// are sampled uniformly at random. The number of nonzero entries is
+    /// `sqrt(2^num_vars)` and indices of those nonzero entries are distributed
+    /// uniformly at random.
     fn rand<R: Rng>(num_vars: usize, rng: &mut R) -> Self {
         Self::rand_with_config(num_vars, 1 << (num_vars / 2), rng)
     }
@@ -130,9 +139,7 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
     fn relabel(&self, mut a: usize, mut b: usize, k: usize) -> Self {
         if a > b {
             // swap
-            let t = a;
-            a = b;
-            b = t;
+            core::mem::swap(&mut a, &mut b);
         }
         // sanity check
         assert!(
@@ -203,11 +210,14 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
 impl<F: Field> Index<usize> for SparseMultilinearExtension<F> {
     type Output = F;
 
-    /// Returns the evaluation of the polynomial at a point represented by index.
+    /// Returns the evaluation of the polynomial at a point represented by
+    /// index.
     ///
-    /// Index represents a vector in {0,1}^`num_vars` in little endian form. For example, `0b1011` represents `P(1,1,0,1)`
+    /// Index represents a vector in {0,1}^`num_vars` in little endian form. For
+    /// example, `0b1011` represents `P(1,1,0,1)`
     ///
-    /// For Sparse multilinear polynomial, Lookup_evaluation takes log time to the size of polynomial.
+    /// For Sparse multilinear polynomial, Lookup_evaluation takes log time to
+    /// the size of polynomial.
     fn index(&self, index: usize) -> &Self::Output {
         if let Some(v) = self.evaluations.get(&index) {
             v
@@ -267,15 +277,13 @@ impl<F: Field> AddAssign for SparseMultilinearExtension<F> {
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<&'a SparseMultilinearExtension<F>>
-    for SparseMultilinearExtension<F>
-{
+impl<'a, F: Field> AddAssign<&'a SparseMultilinearExtension<F>> for SparseMultilinearExtension<F> {
     fn add_assign(&mut self, other: &'a SparseMultilinearExtension<F>) {
         *self = &*self + other;
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<(F, &'a SparseMultilinearExtension<F>)>
+impl<'a, F: Field> AddAssign<(F, &'a SparseMultilinearExtension<F>)>
     for SparseMultilinearExtension<F>
 {
     fn add_assign(&mut self, (f, other): (F, &'a SparseMultilinearExtension<F>)) {
@@ -336,9 +344,7 @@ impl<F: Field> SubAssign for SparseMultilinearExtension<F> {
     }
 }
 
-impl<'a, 'b, F: Field> SubAssign<&'a SparseMultilinearExtension<F>>
-    for SparseMultilinearExtension<F>
-{
+impl<'a, F: Field> SubAssign<&'a SparseMultilinearExtension<F>> for SparseMultilinearExtension<F> {
     fn sub_assign(&mut self, other: &'a SparseMultilinearExtension<F>) {
         *self = &*self - other;
     }
@@ -392,13 +398,12 @@ fn hashmap_to_treemap<F: Field>(map: &HashMap<usize, F>) -> BTreeMap<usize, F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::evaluations::multivariate::multilinear::MultilinearExtension;
-    use crate::SparseMultilinearExtension;
+    use crate::{
+        evaluations::multivariate::multilinear::MultilinearExtension, SparseMultilinearExtension,
+    };
     use ark_ff::{One, Zero};
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-    use ark_std::ops::Neg;
-    use ark_std::vec::Vec;
-    use ark_std::{test_rng, UniformRand};
+    use ark_std::{ops::Neg, test_rng, vec::Vec, UniformRand};
     use ark_test_curves::bls12_381::Fr;
     /// Some sanity test to ensure random sparse polynomial make sense.
     #[test]
@@ -448,7 +453,7 @@ mod tests {
         let mut rng = test_rng();
         let ev1 = Fr::rand(&mut rng);
         let poly1 = SparseMultilinearExtension::from_evaluations(0, &vec![(0, ev1)]);
-        assert_eq!(poly1.evaluate(&vec![]).unwrap(), ev1);
+        assert_eq!(poly1.evaluate(&[]).unwrap(), ev1);
 
         // test single-variate polynomial
         let ev2 = vec![Fr::rand(&mut rng), Fr::rand(&mut rng)];
@@ -457,7 +462,7 @@ mod tests {
 
         let x = Fr::rand(&mut rng);
         assert_eq!(
-            poly2.evaluate(&vec![x]).unwrap(),
+            poly2.evaluate(&[x]).unwrap(),
             x * ev2[1] + (Fr::one() - x) * ev2[0]
         );
 
@@ -466,7 +471,7 @@ mod tests {
         let poly2 = SparseMultilinearExtension::from_evaluations(1, &vec![(1, ev3)]);
 
         let x = Fr::rand(&mut rng);
-        assert_eq!(poly2.evaluate(&vec![x]).unwrap(), x * ev3);
+        assert_eq!(poly2.evaluate(&[x]).unwrap(), x * ev3);
     }
 
     #[test]
@@ -581,10 +586,10 @@ mod tests {
             let point: Vec<_> = (0..10).map(|_| Fr::rand(&mut rng)).collect();
             let expected = poly.evaluate(&point);
 
-            poly.serialize(&mut buf).unwrap();
+            poly.serialize_compressed(&mut buf).unwrap();
 
             let poly2: SparseMultilinearExtension<Fr> =
-                SparseMultilinearExtension::deserialize(&buf[..]).unwrap();
+                SparseMultilinearExtension::deserialize_compressed(&buf[..]).unwrap();
             assert_eq!(poly2.evaluate(&point), expected);
         }
     }

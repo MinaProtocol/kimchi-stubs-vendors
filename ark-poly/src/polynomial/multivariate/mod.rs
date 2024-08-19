@@ -1,11 +1,10 @@
 //! Work with sparse multivariate polynomials.
 use ark_ff::Field;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     cmp::Ordering,
     fmt::{Debug, Error, Formatter},
     hash::Hash,
-    io::{Read, Write},
     ops::Deref,
     vec::Vec,
 };
@@ -35,7 +34,8 @@ pub trait Term:
     /// Create a new `Term` from a list of tuples of the form `(variable, power)`
     fn new(term: Vec<(usize, usize)>) -> Self;
 
-    /// Returns the total degree of `self`. This is the sum of all variable powers in `self`
+    /// Returns the total degree of `self`. This is the sum of all variable
+    /// powers in `self`
     fn degree(&self) -> usize;
 
     /// Returns a list of variables in `self`
@@ -52,7 +52,7 @@ pub trait Term:
 }
 
 /// Stores a term (monomial) in a multivariate polynomial.
-/// Each element is of the form `(variable, power)`.  
+/// Each element is of the form `(variable, power)`.
 #[derive(Clone, PartialEq, Eq, Hash, Default, CanonicalSerialize, CanonicalDeserialize)]
 pub struct SparseTerm(Vec<(usize, usize)>);
 
@@ -61,15 +61,12 @@ impl SparseTerm {
     fn combine(term: &[(usize, usize)]) -> Vec<(usize, usize)> {
         let mut term_dedup: Vec<(usize, usize)> = Vec::new();
         for (var, pow) in term {
-            match term_dedup.last_mut() {
-                Some(prev) => {
-                    if prev.0 == *var {
-                        prev.1 += pow;
-                        continue;
-                    }
+            if let Some(prev) = term_dedup.last_mut() {
+                if prev.0 == *var {
+                    prev.1 += pow;
+                    continue;
                 }
-                _ => {}
-            };
+            }
             term_dedup.push((*var, *pow));
         }
         term_dedup
@@ -107,13 +104,13 @@ impl Term for SparseTerm {
 
     /// Returns whether `self` is a constant
     fn is_constant(&self) -> bool {
-        self.len() == 0
+        self.len() == 0 || self.degree() == 0
     }
 
     /// Evaluates `self` at the given `point` in the field.
     fn evaluate<F: Field>(&self, point: &[F]) -> F {
         cfg_into_iter!(self)
-            .map(|(var, power)| point[*var].pow(&[*power as u64]))
+            .map(|(var, power)| point[*var].pow([*power as u64]))
             .product()
     }
 }

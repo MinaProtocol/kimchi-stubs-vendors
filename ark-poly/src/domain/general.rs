@@ -10,8 +10,10 @@ pub use crate::domain::utils::Elements;
 use crate::domain::{
     DomainCoeff, EvaluationDomain, MixedRadixEvaluationDomain, Radix2EvaluationDomain,
 };
-use ark_ff::{FftField, FftParameters};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
+use ark_ff::FftField;
+use ark_serialize::{
+    CanonicalDeserialize, CanonicalSerialize, Compress, SerializationError, Valid, Validate,
+};
 use ark_std::{
     io::{Read, Write},
     vec::Vec,
@@ -38,120 +40,59 @@ macro_rules! map {
 }
 
 impl<F: FftField> CanonicalSerialize for GeneralEvaluationDomain<F> {
-    fn serialize<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        let type_id = match self {
+    fn serialize_with_mode<W: Write>(
+        &self,
+        mut writer: W,
+        compress: Compress,
+    ) -> Result<(), SerializationError> {
+        let variant = match self {
             GeneralEvaluationDomain::Radix2(_) => 0u8,
             GeneralEvaluationDomain::MixedRadix(_) => 1u8,
         };
-        type_id.serialize(&mut writer)?;
+        variant.serialize_with_mode(&mut writer, compress)?;
 
         match self {
-            GeneralEvaluationDomain::Radix2(domain) => domain.serialize(&mut writer),
-            GeneralEvaluationDomain::MixedRadix(domain) => domain.serialize(&mut writer),
-        }
-    }
-
-    fn serialized_size(&self) -> usize {
-        let type_id = match self {
-            GeneralEvaluationDomain::Radix2(_) => 0u8,
-            GeneralEvaluationDomain::MixedRadix(_) => 1u8,
-        };
-
-        type_id.serialized_size()
-            + match self {
-                GeneralEvaluationDomain::Radix2(domain) => domain.serialized_size(),
-                GeneralEvaluationDomain::MixedRadix(domain) => domain.serialized_size(),
-            }
-    }
-
-    fn serialize_uncompressed<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        let type_id = match self {
-            GeneralEvaluationDomain::Radix2(_) => 0u8,
-            GeneralEvaluationDomain::MixedRadix(_) => 1u8,
-        };
-        type_id.serialize_uncompressed(&mut writer)?;
-
-        match self {
-            GeneralEvaluationDomain::Radix2(domain) => domain.serialize_uncompressed(&mut writer),
+            GeneralEvaluationDomain::Radix2(domain) => {
+                domain.serialize_with_mode(&mut writer, compress)
+            },
             GeneralEvaluationDomain::MixedRadix(domain) => {
-                domain.serialize_uncompressed(&mut writer)
-            }
+                domain.serialize_with_mode(&mut writer, compress)
+            },
         }
     }
 
-    fn serialize_unchecked<W: Write>(&self, mut writer: W) -> Result<(), SerializationError> {
-        let type_id = match self {
-            GeneralEvaluationDomain::Radix2(_) => 0u8,
-            GeneralEvaluationDomain::MixedRadix(_) => 1u8,
-        };
-        type_id.serialize_unchecked(&mut writer)?;
-
-        match self {
-            GeneralEvaluationDomain::Radix2(domain) => domain.serialize_unchecked(&mut writer),
-            GeneralEvaluationDomain::MixedRadix(domain) => domain.serialize_unchecked(&mut writer),
-        }
-    }
-
-    fn uncompressed_size(&self) -> usize {
+    fn serialized_size(&self, compress: Compress) -> usize {
         let type_id = match self {
             GeneralEvaluationDomain::Radix2(_) => 0u8,
             GeneralEvaluationDomain::MixedRadix(_) => 1u8,
         };
 
-        type_id.uncompressed_size()
+        type_id.serialized_size(compress)
             + match self {
-                GeneralEvaluationDomain::Radix2(domain) => domain.uncompressed_size(),
-                GeneralEvaluationDomain::MixedRadix(domain) => domain.uncompressed_size(),
+                GeneralEvaluationDomain::Radix2(domain) => domain.serialized_size(compress),
+                GeneralEvaluationDomain::MixedRadix(domain) => domain.serialized_size(compress),
             }
     }
 }
 
+impl<F: FftField> Valid for GeneralEvaluationDomain<F> {
+    fn check(&self) -> Result<(), SerializationError> {
+        Ok(())
+    }
+}
+
 impl<F: FftField> CanonicalDeserialize for GeneralEvaluationDomain<F> {
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let type_id = u8::deserialize(&mut reader)?;
-
-        if type_id == 0u8 {
-            Ok(Self::Radix2(Radix2EvaluationDomain::<F>::deserialize(
-                &mut reader,
-            )?))
-        } else if type_id == 1u8 {
-            Ok(Self::MixedRadix(
-                MixedRadixEvaluationDomain::<F>::deserialize(&mut reader)?,
-            ))
-        } else {
-            Err(SerializationError::InvalidData)
-        }
-    }
-
-    fn deserialize_uncompressed<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let type_id = u8::deserialize_uncompressed(&mut reader)?;
-
-        if type_id == 0u8 {
-            Ok(Self::Radix2(
-                Radix2EvaluationDomain::<F>::deserialize_uncompressed(&mut reader)?,
-            ))
-        } else if type_id == 1u8 {
-            Ok(Self::MixedRadix(
-                MixedRadixEvaluationDomain::<F>::deserialize_uncompressed(&mut reader)?,
-            ))
-        } else {
-            Err(SerializationError::InvalidData)
-        }
-    }
-
-    fn deserialize_unchecked<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let type_id = u8::deserialize_unchecked(&mut reader)?;
-
-        if type_id == 0u8 {
-            Ok(Self::Radix2(
-                Radix2EvaluationDomain::<F>::deserialize_unchecked(&mut reader)?,
-            ))
-        } else if type_id == 1u8 {
-            Ok(Self::MixedRadix(
-                MixedRadixEvaluationDomain::<F>::deserialize_unchecked(&mut reader)?,
-            ))
-        } else {
-            Err(SerializationError::InvalidData)
+    fn deserialize_with_mode<R: Read>(
+        mut reader: R,
+        compress: Compress,
+        validate: Validate,
+    ) -> Result<Self, SerializationError> {
+        match u8::deserialize_with_mode(&mut reader, compress, validate)? {
+            0 => Radix2EvaluationDomain::deserialize_with_mode(&mut reader, compress, validate)
+                .map(Self::Radix2),
+            1 => MixedRadixEvaluationDomain::deserialize_with_mode(&mut reader, compress, validate)
+                .map(Self::MixedRadix),
+            _ => Err(SerializationError::InvalidData),
         }
     }
 }
@@ -171,7 +112,7 @@ impl<F: FftField> EvaluationDomain<F> for GeneralEvaluationDomain<F> {
             return Some(GeneralEvaluationDomain::Radix2(domain));
         }
 
-        if F::FftParams::SMALL_SUBGROUP_BASE.is_some() {
+        if F::SMALL_SUBGROUP_BASE.is_some() {
             return Some(GeneralEvaluationDomain::MixedRadix(
                 MixedRadixEvaluationDomain::new(num_coeffs)?,
             ));
@@ -180,16 +121,21 @@ impl<F: FftField> EvaluationDomain<F> for GeneralEvaluationDomain<F> {
         None
     }
 
+    fn get_coset(&self, offset: F) -> Option<Self> {
+        Some(match self {
+            Self::Radix2(domain) => Self::Radix2(domain.get_coset(offset)?),
+            Self::MixedRadix(domain) => Self::MixedRadix(domain.get_coset(offset)?),
+        })
+    }
+
     fn compute_size_of_domain(num_coeffs: usize) -> Option<usize> {
         let domain_size = Radix2EvaluationDomain::<F>::compute_size_of_domain(num_coeffs);
         if let Some(domain_size) = domain_size {
             return Some(domain_size);
         }
 
-        if F::FftParams::SMALL_SUBGROUP_BASE.is_some() {
-            return Some(MixedRadixEvaluationDomain::<F>::compute_size_of_domain(
-                num_coeffs,
-            )?);
+        if F::SMALL_SUBGROUP_BASE.is_some() {
+            return MixedRadixEvaluationDomain::<F>::compute_size_of_domain(num_coeffs);
         }
 
         None
@@ -201,6 +147,40 @@ impl<F: FftField> EvaluationDomain<F> for GeneralEvaluationDomain<F> {
     }
 
     #[inline]
+    fn log_size_of_group(&self) -> u64 {
+        map!(self, log_size_of_group) as u64
+    }
+
+    #[inline]
+    fn size_inv(&self) -> F {
+        map!(self, size_inv)
+    }
+
+    #[inline]
+    fn group_gen(&self) -> F {
+        map!(self, group_gen)
+    }
+
+    #[inline]
+    fn group_gen_inv(&self) -> F {
+        map!(self, group_gen_inv)
+    }
+
+    #[inline]
+    fn coset_offset(&self) -> F {
+        map!(self, coset_offset)
+    }
+
+    #[inline]
+    fn coset_offset_inv(&self) -> F {
+        map!(self, coset_offset_inv)
+    }
+
+    fn coset_offset_pow_size(&self) -> F {
+        map!(self, coset_offset_pow_size)
+    }
+
+    #[inline]
     fn fft_in_place<T: DomainCoeff<F>>(&self, coeffs: &mut Vec<T>) {
         map!(self, fft_in_place, coeffs)
     }
@@ -208,16 +188,6 @@ impl<F: FftField> EvaluationDomain<F> for GeneralEvaluationDomain<F> {
     #[inline]
     fn ifft_in_place<T: DomainCoeff<F>>(&self, evals: &mut Vec<T>) {
         map!(self, ifft_in_place, evals)
-    }
-
-    #[inline]
-    fn coset_fft_in_place<T: DomainCoeff<F>>(&self, coeffs: &mut Vec<T>) {
-        map!(self, coset_fft_in_place, coeffs)
-    }
-
-    #[inline]
-    fn coset_ifft_in_place<T: DomainCoeff<F>>(&self, evals: &mut Vec<T>) {
-        map!(self, coset_ifft_in_place, evals)
     }
 
     #[inline]
@@ -233,11 +203,6 @@ impl<F: FftField> EvaluationDomain<F> for GeneralEvaluationDomain<F> {
     #[inline]
     fn evaluate_vanishing_polynomial(&self, tau: F) -> F {
         map!(self, evaluate_vanishing_polynomial, tau)
-    }
-
-    /// Returns the `i`-th element of the domain.
-    fn element(&self, i: usize) -> F {
-        map!(self, element, i)
     }
 
     /// Return an iterator over the elements of the domain.
@@ -260,13 +225,10 @@ impl<F: FftField> Iterator for GeneralElements<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::polynomial::Polynomial;
-    use crate::{EvaluationDomain, GeneralEvaluationDomain};
+    use crate::{polynomial::Polynomial, EvaluationDomain, GeneralEvaluationDomain};
     use ark_ff::Zero;
-    use ark_std::rand::Rng;
-    use ark_std::test_rng;
-    use ark_test_curves::bls12_381::Fr;
-    use ark_test_curves::bn384_small_two_adicity::Fr as BNFr;
+    use ark_std::{rand::Rng, test_rng};
+    use ark_test_curves::{bls12_381::Fr, bn384_small_two_adicity::Fr as BNFr};
 
     #[test]
     fn vanishing_polynomial_evaluation() {
