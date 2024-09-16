@@ -1,13 +1,14 @@
 //! A dense univariate polynomial represented in coefficient form.
-use crate::univariate::DenseOrSparsePolynomial;
-use crate::{univariate::SparsePolynomial, Polynomial, UVPolynomial};
-use crate::{EvaluationDomain, Evaluations, GeneralEvaluationDomain};
+use crate::{
+    univariate::{DenseOrSparsePolynomial, SparsePolynomial},
+    DenseUVPolynomial, EvaluationDomain, Evaluations, GeneralEvaluationDomain, Polynomial,
+};
 use ark_ff::{FftField, Field, Zero};
 use ark_serialize::*;
-use ark_std::rand::Rng;
 use ark_std::{
     fmt,
     ops::{Add, AddAssign, Deref, DerefMut, Div, Mul, Neg, Sub, SubAssign},
+    rand::Rng,
     vec::Vec,
 };
 
@@ -93,7 +94,7 @@ impl<F: Field> DensePolynomial<F> {
     }
 }
 
-impl<F: Field> UVPolynomial<F> for DensePolynomial<F> {
+impl<F: Field> DenseUVPolynomial<F> for DensePolynomial<F> {
     /// Constructs a new polynomial from a list of coefficients.
     fn from_coefficients_slice(coeffs: &[F]) -> Self {
         Self::from_coefficients_vec(coeffs.to_vec())
@@ -144,9 +145,48 @@ impl<F: FftField> DensePolynomial<F> {
         &self,
         domain: D,
     ) -> Option<(DensePolynomial<F>, DensePolynomial<F>)> {
-        let self_poly = DenseOrSparsePolynomial::from(self);
-        let vanishing_poly = DenseOrSparsePolynomial::from(domain.vanishing_polynomial());
-        self_poly.divide_with_q_and_r(&vanishing_poly)
+        let domain_size = domain.size();
+
+        if self.coeffs.len() < domain_size {
+            // If degree(self) < len(Domain), then the quotient is zero, and the entire polynomial is the remainder
+            Some((DensePolynomial::<F>::zero(), self.clone()))
+        } else {
+            // Compute the quotient
+            //
+            // If `self.len() <= 2 * domain_size`
+            //    then quotient is simply `self.coeffs[domain_size..]`
+            // Otherwise
+            //    during the division by `x^domain_size - 1`, some of `self.coeffs[domain_size..]` will be updated as well
+            //    which can be computed using the following algorithm.
+            //
+            let mut quotient_vec = self.coeffs[domain_size..].to_vec();
+            for i in 1..(self.len() / domain_size) {
+                cfg_iter_mut!(quotient_vec)
+                    .zip(&self.coeffs[domain_size * (i + 1)..])
+                    .for_each(|(s, c)| *s += c);
+            }
+
+            // Compute the remainder
+            //
+            // `remainder = self - quotient_vec * (x^domain_size - 1)`
+            //
+            // Note that remainder must be smaller than `domain_size`.
+            // So we can look at only the first `domain_size` terms.
+            //
+            // Therefore,
+            // `remainder = self.coeffs[0..domain_size] - quotient_vec * (-1)`
+            // i.e.,
+            // `remainder = self.coeffs[0..domain_size] + quotient_vec`
+            //
+            let mut remainder_vec = self.coeffs[0..domain_size].to_vec();
+            cfg_iter_mut!(remainder_vec)
+                .zip(&quotient_vec)
+                .for_each(|(s, c)| *s += c);
+
+            let quotient = DensePolynomial::<F>::from_coefficients_vec(quotient_vec);
+            let remainder = DensePolynomial::<F>::from_coefficients_vec(remainder_vec);
+            Some((quotient, remainder))
+        }
     }
 }
 
@@ -266,7 +306,7 @@ impl<'a, 'b, F: Field> Add<&'a SparsePolynomial<F>> for &'b DensePolynomial<F> {
 
     #[inline]
     fn add(self, other: &'a SparsePolynomial<F>) -> DensePolynomial<F> {
-        let result = if self.is_zero() {
+        if self.is_zero() {
             other.clone().into()
         } else if other.is_zero() {
             self.clone()
@@ -287,12 +327,11 @@ impl<'a, 'b, F: Field> Add<&'a SparsePolynomial<F>> for &'b DensePolynomial<F> {
             }
             result.coeffs.extend(upper_coeffs);
             result
-        };
-        result
+        }
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<&'a DensePolynomial<F>> for DensePolynomial<F> {
+impl<'a, F: Field> AddAssign<&'a DensePolynomial<F>> for DensePolynomial<F> {
     fn add_assign(&mut self, other: &'a DensePolynomial<F>) {
         if self.is_zero() {
             self.coeffs.truncate(0);
@@ -319,7 +358,7 @@ impl<'a, 'b, F: Field> AddAssign<&'a DensePolynomial<F>> for DensePolynomial<F> 
     }
 }
 
-impl<'a, 'b, F: Field> AddAssign<(F, &'a DensePolynomial<F>)> for DensePolynomial<F> {
+impl<'a, F: Field> AddAssign<(F, &'a DensePolynomial<F>)> for DensePolynomial<F> {
     fn add_assign(&mut self, (f, other): (F, &'a DensePolynomial<F>)) {
         if self.is_zero() {
             self.coeffs.truncate(0);
@@ -356,9 +395,7 @@ impl<'a, F: Field> AddAssign<&'a SparsePolynomial<F>> for DensePolynomial<F> {
             for (i, coeff) in other.iter() {
                 self.coeffs[*i] = *coeff;
             }
-            return;
         } else if other.is_zero() {
-            return;
         } else {
             // If `other` has higher degree than `self`, create a dense vector
             // storing the upper coefficients of the addition
@@ -429,7 +466,7 @@ impl<'a, 'b, F: Field> Sub<&'a SparsePolynomial<F>> for &'b DensePolynomial<F> {
 
     #[inline]
     fn sub(self, other: &'a SparsePolynomial<F>) -> DensePolynomial<F> {
-        let result = if self.is_zero() {
+        if self.is_zero() {
             let result = other.clone();
             result.neg().into()
         } else if other.is_zero() {
@@ -451,12 +488,11 @@ impl<'a, 'b, F: Field> Sub<&'a SparsePolynomial<F>> for &'b DensePolynomial<F> {
             }
             result.coeffs.extend(upper_coeffs);
             result
-        };
-        result
+        }
     }
 }
 
-impl<'a, 'b, F: Field> SubAssign<&'a DensePolynomial<F>> for DensePolynomial<F> {
+impl<'a, F: Field> SubAssign<&'a DensePolynomial<F>> for DensePolynomial<F> {
     #[inline]
     fn sub_assign(&mut self, other: &'a DensePolynomial<F>) {
         if self.is_zero() {
@@ -491,9 +527,7 @@ impl<'a, F: Field> SubAssign<&'a SparsePolynomial<F>> for DensePolynomial<F> {
             for (i, coeff) in other.iter() {
                 self.coeffs[*i] = (*coeff).neg();
             }
-            return;
         } else if other.is_zero() {
-            return;
         } else {
             // If `other` has higher degree than `self`, create a dense vector
             // storing the upper coefficients of the subtraction
@@ -524,7 +558,7 @@ impl<'a, 'b, F: Field> Div<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
     }
 }
 
-impl<'a, 'b, F: Field> Mul<F> for &'b DensePolynomial<F> {
+impl<'b, F: Field> Mul<F> for &'b DensePolynomial<F> {
     type Output = DensePolynomial<F>;
 
     #[inline]
@@ -574,10 +608,9 @@ impl<F: Field> Zero for DensePolynomial<F> {
 
 #[cfg(test)]
 mod tests {
-    use crate::polynomial::univariate::*;
-    use crate::{EvaluationDomain, GeneralEvaluationDomain};
+    use crate::{polynomial::univariate::*, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
     use ark_ff::{Field, One, UniformRand, Zero};
-    use ark_std::{rand::Rng, test_rng};
+    use ark_std::{rand::Rng, test_rng, vec::Vec};
     use ark_test_curves::bls12_381::Fr;
 
     fn rand_sparse_poly<R: Rng>(degree: usize, rng: &mut R) -> SparsePolynomial<Fr> {
@@ -816,6 +849,20 @@ mod tests {
     }
 
     #[test]
+    fn divide_by_vanishing_poly() {
+        let rng = &mut test_rng();
+        for size in 1..10 {
+            let domain = GeneralEvaluationDomain::new(1 << size).unwrap();
+            for degree in 0..12 {
+                let p = DensePolynomial::<Fr>::rand(degree * 100, rng);
+                let (quotient, remainder) = p.divide_by_vanishing_poly(domain).unwrap();
+                let p_recovered = quotient.mul_by_vanishing_poly(domain) + remainder;
+                assert_eq!(p, p_recovered);
+            }
+        }
+    }
+
+    #[test]
     fn test_leading_zero() {
         let n = 10;
         let rand_poly = DensePolynomial::rand(n, &mut test_rng());
@@ -841,5 +888,25 @@ mod tests {
         let y = &negative_poly + &rand_poly;
         assert_eq!(y.degree(), n - 1);
         assert!(!y.coeffs.last().unwrap().is_zero());
+    }
+
+    #[test]
+    fn evaluate_over_domain_test() {
+        let rng = &mut ark_std::test_rng();
+        let domain = crate::domain::Radix2EvaluationDomain::<Fr>::new(1 << 10).unwrap();
+        for _ in 0..100 {
+            let poly = DensePolynomial::<Fr>::rand(1 << 11, rng);
+            let evaluations = domain
+                .elements()
+                .map(|e| poly.evaluate(&e))
+                .collect::<Vec<_>>();
+            assert_eq!(evaluations, poly.evaluate_over_domain(domain).evals);
+        }
+        let zero = DensePolynomial::zero();
+        let evaluations = domain
+            .elements()
+            .map(|e| zero.evaluate(&e))
+            .collect::<Vec<_>>();
+        assert_eq!(evaluations, zero.evaluate_over_domain(domain).evals);
     }
 }

@@ -1,4 +1,4 @@
-use crate::{biginteger::BigInteger, Field, FpParameters, PrimeField};
+use crate::{biginteger::BigInteger, Field, PrimeField};
 use ark_std::vec::Vec;
 
 /// Types that can be converted to a vector of `F` elements. Useful for
@@ -42,15 +42,14 @@ impl<ConstraintF: Field> ToConstraintField<ConstraintF> for () {
 impl<ConstraintF: PrimeField> ToConstraintField<ConstraintF> for [u8] {
     #[inline]
     fn to_field_elements(&self) -> Option<Vec<ConstraintF>> {
-        use core::convert::TryFrom;
-        let max_size = usize::try_from(<ConstraintF as PrimeField>::Params::CAPACITY / 8).unwrap();
+        let max_size = ((ConstraintF::MODULUS_BIT_SIZE - 1) / 8) as usize;
         let bigint_size = <ConstraintF as PrimeField>::BigInt::NUM_LIMBS * 8;
         let fes = self
             .chunks(max_size)
             .map(|chunk| {
                 let mut bigint = vec![0u8; bigint_size];
                 bigint.iter_mut().zip(chunk).for_each(|(a, b)| *a = *b);
-                ConstraintF::read(bigint.as_slice()).ok()
+                ConstraintF::deserialize_compressed(bigint.as_slice()).ok()
             })
             .collect::<Option<Vec<_>>>()?;
         Some(fes)

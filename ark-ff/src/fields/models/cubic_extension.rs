@@ -1,12 +1,12 @@
 use ark_serialize::{
     CanonicalDeserialize, CanonicalDeserializeWithFlags, CanonicalSerialize,
-    CanonicalSerializeWithFlags, EmptyFlags, Flags, SerializationError,
+    CanonicalSerializeWithFlags, Compress, EmptyFlags, Flags, SerializationError, Valid, Validate,
 };
 use ark_std::{
     cmp::{Ord, Ordering, PartialOrd},
     fmt,
-    io::{Read, Result as IoResult, Write},
-    marker::PhantomData,
+    io::{Read, Write},
+    iter::Chain,
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     vec::Vec,
 };
@@ -20,19 +20,26 @@ use ark_std::rand::{
 };
 
 use crate::{
-    bytes::{FromBytes, ToBytes},
     fields::{Field, PrimeField},
-    ToConstraintField, UniformRand,
+    LegendreSymbol, SqrtPrecomputation, ToConstraintField, UniformRand,
 };
 
-pub trait CubicExtParameters: 'static + Send + Sync {
+/// Defines a Cubic extension field from a cubic non-residue.
+pub trait CubicExtConfig: 'static + Send + Sync + Sized {
     /// The prime field that this cubic extension is eventually an extension of.
     type BasePrimeField: PrimeField;
     /// The base field that this field is a cubic extension of.
+    ///
+    /// Note: while for simple instances of cubic extensions such as `Fp3`
+    /// we might see `BaseField == BasePrimeField`, it won't always hold true.
+    /// E.g. for an extension tower: `BasePrimeField == Fp`, but `BaseField == Fp2`.
     type BaseField: Field<BasePrimeField = Self::BasePrimeField>;
-    /// The type of the coefficients for an efficient implemntation of the
+    /// The type of the coefficients for an efficient implementation of the
     /// Frobenius endomorphism.
     type FrobCoeff: Field;
+
+    /// Determines the algorithm for computing square roots.
+    const SQRT_PRECOMP: Option<SqrtPrecomputation<CubicExtField<Self>>>;
 
     /// The degree of the extension over the base prime field.
     const DEGREE_OVER_BASE_PRIME_FIELD: usize;
@@ -47,8 +54,17 @@ pub trait CubicExtParameters: 'static + Send + Sync {
     /// A specializable method for multiplying an element of the base field by
     /// the quadratic non-residue. This is used in multiplication and squaring.
     #[inline(always)]
-    fn mul_base_field_by_nonresidue(fe: &Self::BaseField) -> Self::BaseField {
-        Self::NONRESIDUE * fe
+    fn mul_base_field_by_nonresidue_in_place(fe: &mut Self::BaseField) -> &mut Self::BaseField {
+        *fe *= &Self::NONRESIDUE;
+        fe
+    }
+
+    /// A defaulted method for multiplying an element of the base field by
+    /// the quadratic non-residue. This is used in multiplication and squaring.
+    #[inline(always)]
+    fn mul_base_field_by_nonresidue(mut fe: Self::BaseField) -> Self::BaseField {
+        Self::mul_base_field_by_nonresidue_in_place(&mut fe);
+        fe
     }
 
     /// A specializable method for multiplying an element of the base field by
@@ -60,33 +76,47 @@ pub trait CubicExtParameters: 'static + Send + Sync {
     );
 }
 
+/// An element of a cubic extension field F_p\[X\]/(X^3 - P::NONRESIDUE) is
+/// represented as c0 + c1 * X + c2 * X^2, for c0, c1, c2 in `P::BaseField`.
 #[derive(Derivative)]
 #[derivative(
-    Default(bound = "P: CubicExtParameters"),
-    Hash(bound = "P: CubicExtParameters"),
-    Clone(bound = "P: CubicExtParameters"),
-    Copy(bound = "P: CubicExtParameters"),
-    Debug(bound = "P: CubicExtParameters"),
-    PartialEq(bound = "P: CubicExtParameters"),
-    Eq(bound = "P: CubicExtParameters")
+    Default(bound = "P: CubicExtConfig"),
+    Hash(bound = "P: CubicExtConfig"),
+    Clone(bound = "P: CubicExtConfig"),
+    Copy(bound = "P: CubicExtConfig"),
+    Debug(bound = "P: CubicExtConfig"),
+    PartialEq(bound = "P: CubicExtConfig"),
+    Eq(bound = "P: CubicExtConfig")
 )]
-pub struct CubicExtField<P: CubicExtParameters> {
+pub struct CubicExtField<P: CubicExtConfig> {
     pub c0: P::BaseField,
     pub c1: P::BaseField,
     pub c2: P::BaseField,
-    #[derivative(Debug = "ignore")]
-    #[doc(hidden)]
-    pub _parameters: PhantomData<P>,
 }
 
-impl<P: CubicExtParameters> CubicExtField<P> {
-    pub fn new(c0: P::BaseField, c1: P::BaseField, c2: P::BaseField) -> Self {
-        CubicExtField {
-            c0,
-            c1,
-            c2,
-            _parameters: PhantomData,
-        }
+impl<P: CubicExtConfig> CubicExtField<P> {
+    /// Create a new field element from coefficients `c0`, `c1` and `c2`
+    /// so that the result is of the form `c0 + c1 * X + c2 * X^2`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use ark_std::test_rng;
+    /// # use ark_test_curves::bls12_381::{Fq2 as Fp2, Fq6 as Fp6};
+    /// # use ark_test_curves::bls12_381::Fq6Config;
+    /// # use ark_std::UniformRand;
+    /// # use ark_ff::models::fp6_3over2::Fp6ConfigWrapper;
+    /// use ark_ff::models::cubic_extension::CubicExtField;
+    ///
+    /// let c0: Fp2 = Fp2::rand(&mut test_rng());
+    /// let c1: Fp2 = Fp2::rand(&mut test_rng());
+    /// let c2: Fp2 = Fp2::rand(&mut test_rng());
+    /// # type Config = Fp6ConfigWrapper<Fq6Config>;
+    /// // `Fp6` a degree-3 extension over `Fp2`.
+    /// let c: CubicExtField<Config> = Fp6::new(c0, c1, c2);
+    /// ```
+    pub const fn new(c0: P::BaseField, c1: P::BaseField, c2: P::BaseField) -> Self {
+        Self { c0, c1, c2 }
     }
 
     pub fn mul_assign_by_base_field(&mut self, value: &P::BaseField) {
@@ -95,26 +125,28 @@ impl<P: CubicExtParameters> CubicExtField<P> {
         self.c2.mul_assign(value);
     }
 
-    /// Calculate the norm of an element with respect to the base field `P::BaseField`.
+    /// Calculate the norm of an element with respect to the base field
+    /// `P::BaseField`. The norm maps an element `a` in the extension field
+    /// `Fq^m` to an element in the BaseField `Fq`.
+    /// `Norm(a) = a * a^q * a^(q^2)`
     pub fn norm(&self) -> P::BaseField {
+        // w.r.t to BaseField, we need the 0th, 1st & 2nd powers of `q`
+        // Since Frobenius coefficients on the towered extensions are
+        // indexed w.r.t. to BasePrimeField, we need to calculate the correct index.
+        let index_multiplier = P::BaseField::extension_degree() as usize;
         let mut self_to_p = *self;
-        self_to_p.frobenius_map(1);
+        self_to_p.frobenius_map_in_place(index_multiplier);
         let mut self_to_p2 = *self;
-        self_to_p2.frobenius_map(2);
+        self_to_p2.frobenius_map_in_place(2 * index_multiplier);
         self_to_p *= &(self_to_p2 * self);
         assert!(self_to_p.c1.is_zero() && self_to_p.c2.is_zero());
         self_to_p.c0
     }
 }
 
-impl<P: CubicExtParameters> Zero for CubicExtField<P> {
+impl<P: CubicExtConfig> Zero for CubicExtField<P> {
     fn zero() -> Self {
-        CubicExtField {
-            c0: P::BaseField::zero(),
-            c1: P::BaseField::zero(),
-            c2: P::BaseField::zero(),
-            _parameters: PhantomData,
-        }
+        Self::new(P::BaseField::ZERO, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 
     fn is_zero(&self) -> bool {
@@ -122,14 +154,9 @@ impl<P: CubicExtParameters> Zero for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> One for CubicExtField<P> {
+impl<P: CubicExtConfig> One for CubicExtField<P> {
     fn one() -> Self {
-        CubicExtField {
-            c0: P::BaseField::one(),
-            c1: P::BaseField::zero(),
-            c2: P::BaseField::zero(),
-            _parameters: PhantomData,
-        }
+        Self::new(P::BaseField::ONE, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 
     fn is_one(&self) -> bool {
@@ -137,11 +164,32 @@ impl<P: CubicExtParameters> One for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> Field for CubicExtField<P> {
+type BaseFieldIter<P> = <<P as CubicExtConfig>::BaseField as Field>::BasePrimeFieldIter;
+impl<P: CubicExtConfig> Field for CubicExtField<P> {
     type BasePrimeField = P::BasePrimeField;
+    type BasePrimeFieldIter = Chain<BaseFieldIter<P>, Chain<BaseFieldIter<P>, BaseFieldIter<P>>>;
+
+    const SQRT_PRECOMP: Option<SqrtPrecomputation<Self>> = P::SQRT_PRECOMP;
+
+    const ZERO: Self = Self::new(P::BaseField::ZERO, P::BaseField::ZERO, P::BaseField::ZERO);
+
+    const ONE: Self = Self::new(P::BaseField::ONE, P::BaseField::ZERO, P::BaseField::ZERO);
 
     fn extension_degree() -> u64 {
         3 * P::BaseField::extension_degree()
+    }
+
+    fn from_base_prime_field(elem: Self::BasePrimeField) -> Self {
+        let fe = P::BaseField::from_base_prime_field(elem);
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
+    }
+
+    fn to_base_prime_field_elements(&self) -> Self::BasePrimeFieldIter {
+        self.c0.to_base_prime_field_elements().chain(
+            self.c1
+                .to_base_prime_field_elements()
+                .chain(self.c2.to_base_prime_field_elements()),
+        )
     }
 
     fn from_base_prime_field_elems(elems: &[Self::BasePrimeField]) -> Option<Self> {
@@ -167,6 +215,13 @@ impl<P: CubicExtParameters> Field for CubicExtField<P> {
         self.c0.double_in_place();
         self.c1.double_in_place();
         self.c2.double_in_place();
+        self
+    }
+
+    fn neg_in_place(&mut self) -> &mut Self {
+        self.c0.neg_in_place();
+        self.c1.neg_in_place();
+        self.c2.neg_in_place();
         self
     }
 
@@ -212,10 +267,23 @@ impl<P: CubicExtParameters> Field for CubicExtField<P> {
         let s3 = bc.double();
         let s4 = c.square();
 
-        self.c0 = s0 + &P::mul_base_field_by_nonresidue(&s3);
-        self.c1 = s1 + &P::mul_base_field_by_nonresidue(&s4);
+        // c0 = s0 + s3 * NON_RESIDUE
+        self.c0 = s3;
+        P::mul_base_field_by_nonresidue_in_place(&mut self.c0);
+        self.c0 += &s0;
+
+        // c1 = s1 + s4 * NON_RESIDUE
+        self.c1 = s4;
+        P::mul_base_field_by_nonresidue_in_place(&mut self.c1);
+        self.c1 += &s1;
+
         self.c2 = s1 + &s2 + &s3 - &s0 - &s4;
         self
+    }
+
+    /// Returns the Legendre symbol.
+    fn legendre(&self) -> LegendreSymbol {
+        self.norm().legendre()
     }
 
     fn inverse(&self) -> Option<Self> {
@@ -231,16 +299,16 @@ impl<P: CubicExtParameters> Field for CubicExtField<P> {
             let t3 = self.c0 * &self.c1;
             let t4 = self.c0 * &self.c2;
             let t5 = self.c1 * &self.c2;
-            let n5 = P::mul_base_field_by_nonresidue(&t5);
+            let n5 = P::mul_base_field_by_nonresidue(t5);
 
             let s0 = t0 - &n5;
-            let s1 = P::mul_base_field_by_nonresidue(&t2) - &t3;
+            let s1 = P::mul_base_field_by_nonresidue(t2) - &t3;
             let s2 = t1 - &t4; // typo in paper referenced above. should be "-" as per Scott, but is "*"
 
             let a1 = self.c2 * &s1;
             let a2 = self.c1 * &s2;
             let mut a3 = a1 + &a2;
-            a3 = P::mul_base_field_by_nonresidue(&a3);
+            a3 = P::mul_base_field_by_nonresidue(a3);
             let t6 = (self.c0 * &s0 + &a3).inverse().unwrap();
 
             let c0 = t6 * &s0;
@@ -260,17 +328,17 @@ impl<P: CubicExtParameters> Field for CubicExtField<P> {
         }
     }
 
-    fn frobenius_map(&mut self, power: usize) {
-        self.c0.frobenius_map(power);
-        self.c1.frobenius_map(power);
-        self.c2.frobenius_map(power);
+    fn frobenius_map_in_place(&mut self, power: usize) {
+        self.c0.frobenius_map_in_place(power);
+        self.c1.frobenius_map_in_place(power);
+        self.c2.frobenius_map_in_place(power);
 
         P::mul_base_field_by_frob_coeff(&mut self.c1, &mut self.c2, power);
     }
 }
 
 /// `CubicExtField` elements are ordered lexicographically.
-impl<P: CubicExtParameters> Ord for CubicExtField<P> {
+impl<P: CubicExtConfig> Ord for CubicExtField<P> {
     #[inline(always)]
     fn cmp(&self, other: &Self) -> Ordering {
         let c2_cmp = self.c2.cmp(&other.c2);
@@ -288,14 +356,14 @@ impl<P: CubicExtParameters> Ord for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> PartialOrd for CubicExtField<P> {
+impl<P: CubicExtConfig> PartialOrd for CubicExtField<P> {
     #[inline(always)]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<P: CubicExtParameters> Zeroize for CubicExtField<P> {
+impl<P: CubicExtConfig> Zeroize for CubicExtField<P> {
     // The phantom data does not contain element-specific data
     // and thus does not need to be zeroized.
     fn zeroize(&mut self) {
@@ -305,14 +373,14 @@ impl<P: CubicExtParameters> Zeroize for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<u128> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<u128> for CubicExtField<P> {
     fn from(other: u128) -> Self {
         let fe: P::BaseField = other.into();
-        Self::new(fe, P::BaseField::zero(), P::BaseField::zero())
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 }
 
-impl<P: CubicExtParameters> From<i128> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<i128> for CubicExtField<P> {
     #[inline]
     fn from(val: i128) -> Self {
         let abs = Self::from(val.unsigned_abs());
@@ -324,14 +392,14 @@ impl<P: CubicExtParameters> From<i128> for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<u64> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<u64> for CubicExtField<P> {
     fn from(other: u64) -> Self {
         let fe: P::BaseField = other.into();
-        Self::new(fe, P::BaseField::zero(), P::BaseField::zero())
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 }
 
-impl<P: CubicExtParameters> From<i64> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<i64> for CubicExtField<P> {
     #[inline]
     fn from(val: i64) -> Self {
         let abs = Self::from(val.unsigned_abs());
@@ -343,14 +411,14 @@ impl<P: CubicExtParameters> From<i64> for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<u32> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<u32> for CubicExtField<P> {
     fn from(other: u32) -> Self {
         let fe: P::BaseField = other.into();
-        Self::new(fe, P::BaseField::zero(), P::BaseField::zero())
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 }
 
-impl<P: CubicExtParameters> From<i32> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<i32> for CubicExtField<P> {
     #[inline]
     fn from(val: i32) -> Self {
         let abs = Self::from(val.unsigned_abs());
@@ -362,14 +430,14 @@ impl<P: CubicExtParameters> From<i32> for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<u16> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<u16> for CubicExtField<P> {
     fn from(other: u16) -> Self {
         let fe: P::BaseField = other.into();
-        Self::new(fe, P::BaseField::zero(), P::BaseField::zero())
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 }
 
-impl<P: CubicExtParameters> From<i16> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<i16> for CubicExtField<P> {
     #[inline]
     fn from(val: i16) -> Self {
         let abs = Self::from(val.unsigned_abs());
@@ -381,14 +449,14 @@ impl<P: CubicExtParameters> From<i16> for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<u8> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<u8> for CubicExtField<P> {
     fn from(other: u8) -> Self {
         let fe: P::BaseField = other.into();
-        Self::new(fe, P::BaseField::zero(), P::BaseField::zero())
+        Self::new(fe, P::BaseField::ZERO, P::BaseField::ZERO)
     }
 }
 
-impl<P: CubicExtParameters> From<i8> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<i8> for CubicExtField<P> {
     #[inline]
     fn from(val: i8) -> Self {
         let abs = Self::from(val.unsigned_abs());
@@ -400,47 +468,28 @@ impl<P: CubicExtParameters> From<i8> for CubicExtField<P> {
     }
 }
 
-impl<P: CubicExtParameters> From<bool> for CubicExtField<P> {
+impl<P: CubicExtConfig> From<bool> for CubicExtField<P> {
     fn from(other: bool) -> Self {
         Self::new(
             u8::from(other).into(),
-            P::BaseField::zero(),
-            P::BaseField::zero(),
+            P::BaseField::ZERO,
+            P::BaseField::ZERO,
         )
     }
 }
 
-impl<P: CubicExtParameters> ToBytes for CubicExtField<P> {
-    #[inline]
-    fn write<W: Write>(&self, mut writer: W) -> IoResult<()> {
-        self.c0.write(&mut writer)?;
-        self.c1.write(&mut writer)?;
-        self.c2.write(writer)
-    }
-}
-
-impl<P: CubicExtParameters> FromBytes for CubicExtField<P> {
-    #[inline]
-    fn read<R: Read>(mut reader: R) -> IoResult<Self> {
-        let c0 = P::BaseField::read(&mut reader)?;
-        let c1 = P::BaseField::read(&mut reader)?;
-        let c2 = P::BaseField::read(reader)?;
-        Ok(CubicExtField::new(c0, c1, c2))
-    }
-}
-
-impl<P: CubicExtParameters> Neg for CubicExtField<P> {
+impl<P: CubicExtConfig> Neg for CubicExtField<P> {
     type Output = Self;
     #[inline]
     fn neg(mut self) -> Self {
-        self.c0 = -self.c0;
-        self.c1 = -self.c1;
-        self.c2 = -self.c2;
+        self.c0.neg_in_place();
+        self.c1.neg_in_place();
+        self.c2.neg_in_place();
         self
     }
 }
 
-impl<P: CubicExtParameters> Distribution<CubicExtField<P>> for Standard {
+impl<P: CubicExtConfig> Distribution<CubicExtField<P>> for Standard {
     #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> CubicExtField<P> {
         CubicExtField::new(
@@ -451,7 +500,7 @@ impl<P: CubicExtParameters> Distribution<CubicExtField<P>> for Standard {
     }
 }
 
-impl<'a, P: CubicExtParameters> Add<&'a CubicExtField<P>> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> Add<&'a CubicExtField<P>> for CubicExtField<P> {
     type Output = Self;
 
     #[inline]
@@ -461,7 +510,7 @@ impl<'a, P: CubicExtParameters> Add<&'a CubicExtField<P>> for CubicExtField<P> {
     }
 }
 
-impl<'a, P: CubicExtParameters> Sub<&'a CubicExtField<P>> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> Sub<&'a CubicExtField<P>> for CubicExtField<P> {
     type Output = Self;
 
     #[inline]
@@ -471,7 +520,7 @@ impl<'a, P: CubicExtParameters> Sub<&'a CubicExtField<P>> for CubicExtField<P> {
     }
 }
 
-impl<'a, P: CubicExtParameters> Mul<&'a CubicExtField<P>> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> Mul<&'a CubicExtField<P>> for CubicExtField<P> {
     type Output = Self;
 
     #[inline]
@@ -481,7 +530,7 @@ impl<'a, P: CubicExtParameters> Mul<&'a CubicExtField<P>> for CubicExtField<P> {
     }
 }
 
-impl<'a, P: CubicExtParameters> Div<&'a CubicExtField<P>> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> Div<&'a CubicExtField<P>> for CubicExtField<P> {
     type Output = Self;
 
     #[inline]
@@ -491,9 +540,9 @@ impl<'a, P: CubicExtParameters> Div<&'a CubicExtField<P>> for CubicExtField<P> {
     }
 }
 
-impl_additive_ops_from_ref!(CubicExtField, CubicExtParameters);
-impl_multiplicative_ops_from_ref!(CubicExtField, CubicExtParameters);
-impl<'a, P: CubicExtParameters> AddAssign<&'a Self> for CubicExtField<P> {
+impl_additive_ops_from_ref!(CubicExtField, CubicExtConfig);
+impl_multiplicative_ops_from_ref!(CubicExtField, CubicExtConfig);
+impl<'a, P: CubicExtConfig> AddAssign<&'a Self> for CubicExtField<P> {
     #[inline]
     fn add_assign(&mut self, other: &Self) {
         self.c0.add_assign(&other.c0);
@@ -502,7 +551,7 @@ impl<'a, P: CubicExtParameters> AddAssign<&'a Self> for CubicExtField<P> {
     }
 }
 
-impl<'a, P: CubicExtParameters> SubAssign<&'a Self> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> SubAssign<&'a Self> for CubicExtField<P> {
     #[inline]
     fn sub_assign(&mut self, other: &Self) {
         self.c0.sub_assign(&other.c0);
@@ -511,7 +560,7 @@ impl<'a, P: CubicExtParameters> SubAssign<&'a Self> for CubicExtField<P> {
     }
 }
 
-impl<'a, P: CubicExtParameters> MulAssign<&'a Self> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> MulAssign<&'a Self> for CubicExtField<P> {
     #[inline]
     #[allow(clippy::many_single_char_names)]
     fn mul_assign(&mut self, other: &Self) {
@@ -535,81 +584,100 @@ impl<'a, P: CubicExtParameters> MulAssign<&'a Self> for CubicExtField<P> {
         let y = (d + &e) * &(a + &b) - &ad - &be;
         let z = (d + &f) * &(a + &c) - &ad + &be - &cf;
 
-        self.c0 = ad + &P::mul_base_field_by_nonresidue(&x);
-        self.c1 = y + &P::mul_base_field_by_nonresidue(&cf);
+        self.c0 = ad + &P::mul_base_field_by_nonresidue(x);
+        self.c1 = y + &P::mul_base_field_by_nonresidue(cf);
         self.c2 = z;
     }
 }
 
-impl<'a, P: CubicExtParameters> DivAssign<&'a Self> for CubicExtField<P> {
+impl<'a, P: CubicExtConfig> DivAssign<&'a Self> for CubicExtField<P> {
     #[inline]
     fn div_assign(&mut self, other: &Self) {
         self.mul_assign(&other.inverse().unwrap());
     }
 }
 
-impl<P: CubicExtParameters> fmt::Display for CubicExtField<P> {
+impl<P: CubicExtConfig> fmt::Display for CubicExtField<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CubicExtField({}, {}, {})", self.c0, self.c1, self.c2)
     }
 }
 
-impl<P: CubicExtParameters> CanonicalSerializeWithFlags for CubicExtField<P> {
+impl<P: CubicExtConfig> CanonicalSerializeWithFlags for CubicExtField<P> {
     #[inline]
     fn serialize_with_flags<W: Write, F: Flags>(
         &self,
         mut writer: W,
         flags: F,
     ) -> Result<(), SerializationError> {
-        self.c0.serialize(&mut writer)?;
-        self.c1.serialize(&mut writer)?;
+        self.c0.serialize_compressed(&mut writer)?;
+        self.c1.serialize_compressed(&mut writer)?;
         self.c2.serialize_with_flags(&mut writer, flags)?;
         Ok(())
     }
 
     #[inline]
     fn serialized_size_with_flags<F: Flags>(&self) -> usize {
-        self.c0.serialized_size()
-            + self.c1.serialized_size()
+        self.c0.compressed_size()
+            + self.c1.compressed_size()
             + self.c2.serialized_size_with_flags::<F>()
     }
 }
 
-impl<P: CubicExtParameters> CanonicalSerialize for CubicExtField<P> {
+impl<P: CubicExtConfig> CanonicalSerialize for CubicExtField<P> {
     #[inline]
-    fn serialize<W: Write>(&self, writer: W) -> Result<(), SerializationError> {
+    fn serialize_with_mode<W: Write>(
+        &self,
+        writer: W,
+        _compress: Compress,
+    ) -> Result<(), SerializationError> {
         self.serialize_with_flags(writer, EmptyFlags)
     }
 
     #[inline]
-    fn serialized_size(&self) -> usize {
+    fn serialized_size(&self, _compress: Compress) -> usize {
         self.serialized_size_with_flags::<EmptyFlags>()
     }
 }
 
-impl<P: CubicExtParameters> CanonicalDeserializeWithFlags for CubicExtField<P> {
+impl<P: CubicExtConfig> CanonicalDeserializeWithFlags for CubicExtField<P> {
     #[inline]
     fn deserialize_with_flags<R: Read, F: Flags>(
         mut reader: R,
     ) -> Result<(Self, F), SerializationError> {
-        let c0 = CanonicalDeserialize::deserialize(&mut reader)?;
-        let c1 = CanonicalDeserialize::deserialize(&mut reader)?;
+        let c0 = CanonicalDeserialize::deserialize_compressed(&mut reader)?;
+        let c1 = CanonicalDeserialize::deserialize_compressed(&mut reader)?;
         let (c2, flags) = CanonicalDeserializeWithFlags::deserialize_with_flags(&mut reader)?;
         Ok((CubicExtField::new(c0, c1, c2), flags))
     }
 }
 
-impl<P: CubicExtParameters> CanonicalDeserialize for CubicExtField<P> {
+impl<P: CubicExtConfig> Valid for CubicExtField<P> {
+    fn check(&self) -> Result<(), SerializationError> {
+        self.c0.check()?;
+        self.c1.check()?;
+        self.c2.check()
+    }
+}
+
+impl<P: CubicExtConfig> CanonicalDeserialize for CubicExtField<P> {
     #[inline]
-    fn deserialize<R: Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let c0: P::BaseField = CanonicalDeserialize::deserialize(&mut reader)?;
-        let c1: P::BaseField = CanonicalDeserialize::deserialize(&mut reader)?;
-        let c2: P::BaseField = CanonicalDeserialize::deserialize(&mut reader)?;
+    fn deserialize_with_mode<R: Read>(
+        mut reader: R,
+        compress: Compress,
+        validate: Validate,
+    ) -> Result<Self, SerializationError> {
+        let c0: P::BaseField =
+            CanonicalDeserialize::deserialize_with_mode(&mut reader, compress, validate)?;
+        let c1: P::BaseField =
+            CanonicalDeserialize::deserialize_with_mode(&mut reader, compress, validate)?;
+        let c2: P::BaseField =
+            CanonicalDeserialize::deserialize_with_mode(&mut reader, compress, validate)?;
         Ok(CubicExtField::new(c0, c1, c2))
     }
 }
 
-impl<P: CubicExtParameters> ToConstraintField<P::BasePrimeField> for CubicExtField<P>
+impl<P: CubicExtConfig> ToConstraintField<P::BasePrimeField> for CubicExtField<P>
 where
     P::BaseField: ToConstraintField<P::BasePrimeField>,
 {
@@ -630,8 +698,24 @@ where
 #[cfg(test)]
 mod cube_ext_tests {
     use super::*;
-    use crate::test_field::{Fq, Fq2, Fq6};
     use ark_std::test_rng;
+    use ark_test_curves::{
+        bls12_381::{Fq, Fq2, Fq6},
+        mnt6_753::Fq3,
+        Field,
+    };
+
+    #[test]
+    fn test_norm_for_towers() {
+        // First, test the simple fp3
+        let mut rng = test_rng();
+        let a: Fq3 = rng.gen();
+        let _ = a.norm();
+
+        // then also the tower 3_over_2, norm should work
+        let a: Fq6 = rng.gen();
+        let _ = a.norm();
+    }
 
     #[test]
     fn test_from_base_prime_field_elements() {
@@ -664,6 +748,22 @@ mod cube_ext_tests {
             let expected_2 = Fq2::new(random_coeffs[3], random_coeffs[4]);
             let expected = Fq6::new(expected_0, expected_1, expected_2);
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_from_base_prime_field_element() {
+        let ext_degree = Fq6::extension_degree() as usize;
+        let max_num_elems_to_test = 10;
+        for _ in 0..max_num_elems_to_test {
+            let mut random_coeffs = vec![Fq::zero(); ext_degree];
+            let random_coeff = Fq::rand(&mut test_rng());
+            let res = Fq6::from_base_prime_field(random_coeff);
+            random_coeffs[0] = random_coeff;
+            assert_eq!(
+                res,
+                Fq6::from_base_prime_field_elems(&random_coeffs).unwrap()
+            );
         }
     }
 }

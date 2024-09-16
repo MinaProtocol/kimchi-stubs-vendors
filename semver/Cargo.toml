@@ -3,41 +3,72 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g., crates.io) dependencies
+# to registry (e.g., crates.io) dependencies.
 #
-# If you believe there's an error in this file please file an
-# issue against the rust-lang/cargo repository. If you're
-# editing this file be aware that the upstream Cargo.toml
-# will likely look very different (and much more reasonable)
+# If you are reading this file be aware that the original Cargo.toml
+# will likely look very different (and much more reasonable).
+# See Cargo.toml.orig for the original contents.
 
 [package]
+edition = "2018"
+rust-version = "1.31"
 name = "semver"
-version = "0.11.0"
-authors = ["Steve Klabnik <steve@steveklabnik.com>", "The Rust Project Developers"]
-description = "Semantic version parsing and comparison.\n"
-homepage = "https://docs.rs/crate/semver/"
-documentation = "https://docs.rs/crate/semver/"
+version = "1.0.23"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+build = "build.rs"
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Parser and evaluator for Cargo's flavor of Semantic Versioning"
+documentation = "https://docs.rs/semver"
 readme = "README.md"
-keywords = ["version", "semantic", "compare"]
-categories = ["development-tools", "parser-implementations"]
-license = "MIT/Apache-2.0"
-repository = "https://github.com/steveklabnik/semver"
-[dependencies.diesel]
-version = "1.1"
-optional = true
+keywords = ["cargo"]
+categories = [
+    "data-structures",
+    "no-std",
+]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dtolnay/semver"
 
-[dependencies.semver-parser]
-version = "0.10.0"
+[package.metadata.docs.rs]
+rustdoc-args = [
+    "--cfg",
+    "doc_cfg",
+    "--generate-link-to-definition",
+]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[lib]
+name = "semver"
+path = "src/lib.rs"
+doc-scrape-examples = false
+
+[[test]]
+name = "test_version_req"
+path = "tests/test_version_req.rs"
+
+[[test]]
+name = "test_identifier"
+path = "tests/test_identifier.rs"
+
+[[test]]
+name = "test_autotrait"
+path = "tests/test_autotrait.rs"
+
+[[test]]
+name = "test_version"
+path = "tests/test_version.rs"
+
+[[bench]]
+name = "parse"
+path = "benches/parse.rs"
 
 [dependencies.serde]
-version = "1.0"
+version = "1.0.194"
 optional = true
-[dev-dependencies.serde_derive]
-version = "1.0"
-
-[dev-dependencies.serde_json]
-version = "1.0"
+default-features = false
 
 [features]
-ci = ["serde", "diesel/sqlite"]
-default = []
+default = ["std"]
+std = []

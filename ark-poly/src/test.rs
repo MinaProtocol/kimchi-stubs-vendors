@@ -1,8 +1,10 @@
 use crate::domain::*;
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::test_rng;
-use ark_test_curves::bls12_381::{Fr, G1Projective};
-use ark_test_curves::bn384_small_two_adicity::Fr as BNFr;
+use ark_test_curves::{
+    bls12_381::{Fr, G1Projective},
+    bn384_small_two_adicity::Fr as BNFr,
+};
 
 // Test multiplying various (low degree) polynomials together and
 // comparing with naive evaluations.
@@ -21,6 +23,7 @@ fn fft_composition() {
             let coeffs = 1 << coeffs;
 
             let domain = D::new(coeffs).unwrap();
+            let coset_domain = domain.get_coset(F::GENERATOR).unwrap();
 
             let mut v = vec![];
             for _ in 0..coeffs {
@@ -38,13 +41,13 @@ fn fft_composition() {
             domain.ifft_in_place(&mut v2);
             assert_eq!(v, v2, "fft(ifft(.)) != iden");
 
-            domain.coset_ifft_in_place(&mut v2);
-            domain.coset_fft_in_place(&mut v2);
-            assert_eq!(v, v2, "coset_fft(coset_ifft(.)) != iden");
+            coset_domain.ifft_in_place(&mut v2);
+            coset_domain.fft_in_place(&mut v2);
+            assert_eq!(v, v2, "fft(ifft(.)) != iden");
 
-            domain.coset_fft_in_place(&mut v2);
-            domain.coset_ifft_in_place(&mut v2);
-            assert_eq!(v, v2, "coset_ifft(coset_fft(.)) != iden");
+            coset_domain.fft_in_place(&mut v2);
+            coset_domain.ifft_in_place(&mut v2);
+            assert_eq!(v, v2, "ifft(fft(.)) != iden");
         }
     }
 
