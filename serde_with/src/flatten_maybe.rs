@@ -34,6 +34,8 @@
 /// // Supports both flattened
 /// let j = r#" {"i":1} "#;
 /// assert!(serde_json::from_str::<S>(j).is_ok());
+/// # // Ensure the t field is not dead code
+/// # assert_eq!(serde_json::from_str::<S>(j).unwrap().t.i, 1);
 ///
 /// // and non-flattened versions.
 /// let j = r#" {"t":{"i":1}} "#;
@@ -50,19 +52,21 @@
 /// ```
 #[macro_export]
 macro_rules! flattened_maybe {
-    ($fn:ident, $field:literal) => {
-        fn $fn<'de, T, D>(deserializer: D) -> ::std::result::Result<T, D::Error>
+    ($fn:ident, $field:tt) => {
+        fn $fn<'de, T, D>(deserializer: D) -> $crate::__private__::Result<T, D::Error>
         where
             T: $crate::serde::Deserialize<'de>,
             D: $crate::serde::Deserializer<'de>,
         {
-            use ::std::{
-                option::Option::{self, None, Some},
-                result::Result::{self, Err, Ok},
+            use $crate::{
+                __private__::{
+                    Option::{self, None, Some},
+                    Result::{self, Err, Ok},
+                },
+                serde,
             };
-            use $crate::serde;
 
-            #[derive($crate::serde::Deserialize)]
+            #[derive($crate::serde_derive::Deserialize)]
             #[serde(crate = "serde")]
             pub struct Both<T> {
                 #[serde(flatten)]

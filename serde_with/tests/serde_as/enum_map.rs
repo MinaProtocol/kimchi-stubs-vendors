@@ -9,7 +9,7 @@ fn bytes_debug_readable(bytes: &[u8]) -> String {
     for &byte in bytes {
         match byte {
             non_printable if !(0x20..0x7f).contains(&non_printable) => {
-                write!(result, "\\x{:02x}", byte).unwrap();
+                result.write_fmt(format_args!("\\x{byte:02x}")).unwrap();
             }
             b'\\' => result.push_str("\\\\"),
             _ => {
@@ -224,7 +224,7 @@ fn xml_round_trip() {
     };
 
     let xml = serde_xml_rs::to_string(&values).unwrap();
-    expect_test::expect![[r#"<VecEnumValues><vec><Int>123</Int><String>FooBar</String><Int>456</Int><String>XXX</String><Unit></Unit></vec></VecEnumValues>"#]]
+    expect_test::expect![[r#"<?xml version="1.0" encoding="UTF-8"?><VecEnumValues><vec><Int>123</Int><String>FooBar</String><Int>456</Int><String>XXX</String><Unit /></vec></VecEnumValues>"#]]
         .assert_eq(&xml);
     let deser_values: VecEnumValues = serde_xml_rs::from_str(&xml).unwrap();
     assert_eq!(values, deser_values);
@@ -412,7 +412,7 @@ fn rmp_round_trip() {
     };
 
     let rmp = rmp_serde::to_vec(&values).unwrap();
-    expect_test::expect![[r#"\x91\x88\xa3Int{\xa6String\xa6FooBar\xa3Int\xcd\x01\xc8\xa6String\xa3XXX\xa4Unit\xc0\xa5Tuple\x93\x01\xa6Middle\xc2\xa6Struct\x93\xcd\x02\x9a\xa3BBB\xc3\xa2Ip\x92\x81\xa2V4\x94\x7f\x00\x00\x01\x81\xa2V6\xdc\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00ww\xcc\xde\xcc\xad\xcc\xbe\xcc\xef"#]]
+    expect_test::expect![[r"\x91\x88\xa3Int{\xa6String\xa6FooBar\xa3Int\xcd\x01\xc8\xa6String\xa3XXX\xa4Unit\xc0\xa5Tuple\x93\x01\xa6Middle\xc2\xa6Struct\x93\xcd\x02\x9a\xa3BBB\xc3\xa2Ip\x92\x81\xa2V4\x94\x7f\x00\x00\x01\x81\xa2V6\xdc\x00\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00ww\xcc\xde\xcc\xad\xcc\xbe\xcc\xef"]]
         .assert_eq(&bytes_debug_readable(&rmp));
     let deser_values: VecEnumValues = rmp_serde::from_read(&*rmp).unwrap();
     assert_eq!(values, deser_values);
@@ -439,20 +439,19 @@ fn yaml_round_trip() {
 
     let yaml = serde_yaml::to_string(&values).unwrap();
     expect_test::expect![[r#"
-            ---
-            vec:
-              Int: 123
-              String: FooBar
-              Unit: ~
-              Tuple:
-                - 1
-                - Middle
-                - false
-              Struct:
-                a: 666
-                b: BBB
-                c: true
-        "#]]
+        vec:
+          Int: 123
+          String: FooBar
+          Unit: null
+          Tuple:
+          - 1
+          - Middle
+          - false
+          Struct:
+            a: 666
+            b: BBB
+            c: true
+    "#]]
     .assert_eq(&yaml);
     let deser_values: VecEnumValues = serde_yaml::from_str(&yaml).unwrap();
     assert_eq!(values, deser_values);

@@ -1,12 +1,13 @@
 use proc_macro2::TokenStream;
-use quote::ToTokens;
+use quote::{quote, ToTokens};
 use syn::Ident;
 
 use crate::{
     codegen::{ExtractAttribute, OuterFromImpl, TraitImpl},
-    options::ForwardAttrs,
     util::PathList,
 };
+
+use super::ForwardAttrs;
 
 /// `impl FromField` generator. This is used for parsing an individual
 /// field and its attributes.
@@ -14,10 +15,9 @@ pub struct FromFieldImpl<'a> {
     pub ident: Option<&'a Ident>,
     pub vis: Option<&'a Ident>,
     pub ty: Option<&'a Ident>,
-    pub attrs: Option<&'a Ident>,
     pub base: TraitImpl<'a>,
     pub attr_names: &'a PathList,
-    pub forward_attrs: Option<&'a ForwardAttrs>,
+    pub forward_attrs: ForwardAttrs<'a>,
     pub from_ident: bool,
 }
 
@@ -43,7 +43,7 @@ impl<'a> ToTokens for FromFieldImpl<'a> {
             .map(|i| quote!(#i: #input.ident.clone(),));
         let passed_vis = self.vis.as_ref().map(|i| quote!(#i: #input.vis.clone(),));
         let passed_ty = self.ty.as_ref().map(|i| quote!(#i: #input.ty.clone(),));
-        let passed_attrs = self.attrs.as_ref().map(|i| quote!(#i: __fwd_attrs,));
+        let passed_attrs = self.forward_attrs.as_initializer();
 
         // Determine which attributes to forward (if any).
         let grab_attrs = self.extractor();
@@ -51,7 +51,7 @@ impl<'a> ToTokens for FromFieldImpl<'a> {
 
         self.wrap(
             quote! {
-                fn from_field(#input: &::syn::Field) -> ::darling::Result<Self> {
+                fn from_field(#input: &::darling::export::syn::Field) -> ::darling::Result<Self> {
                     #error_declaration
 
                     #grab_attrs
@@ -82,8 +82,8 @@ impl<'a> ExtractAttribute for FromFieldImpl<'a> {
         self.attr_names
     }
 
-    fn forwarded_attrs(&self) -> Option<&ForwardAttrs> {
-        self.forward_attrs
+    fn forward_attrs(&self) -> &super::ForwardAttrs<'_> {
+        &self.forward_attrs
     }
 
     fn param_name(&self) -> TokenStream {
@@ -96,10 +96,6 @@ impl<'a> ExtractAttribute for FromFieldImpl<'a> {
 
     fn local_declarations(&self) -> TokenStream {
         self.base.local_declarations()
-    }
-
-    fn immutable_declarations(&self) -> TokenStream {
-        self.base.immutable_declarations()
     }
 }
 

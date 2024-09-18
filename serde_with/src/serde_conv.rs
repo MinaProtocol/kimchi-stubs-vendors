@@ -12,7 +12,9 @@
 /// 2. The type `T` we want to extend with custom behavior.
 /// 3. A function or macro taking a `&T` and returning a serializable type.
 /// 4. A function or macro taking a deserializable type and returning a `Result<T, E>`.
-///     The error type `E` must implement `Display`.
+///     The error type `E` must implement [`Display`].
+///
+/// [`Display`]: std::fmt::Display
 ///
 /// # Example
 ///
@@ -22,6 +24,7 @@
 /// ```rust
 /// # #[cfg(feature = "macros")] {
 /// # use serde::{Serialize, Deserialize};
+/// # use serde_with::serde_as;
 ///
 /// #[derive(Clone, Copy, Debug, PartialEq)]
 /// struct Rgb {
@@ -55,7 +58,7 @@
 ///
 /// // We can now use the `RgbAsArray` adapter with `serde_as`.
 ///
-/// #[serde_with::serde_as]
+/// #[serde_as]
 /// #[derive(Debug, PartialEq, Serialize, Deserialize)]
 /// struct Colors {
 ///     #[serde_as(as = "RgbAsArray")]
@@ -107,41 +110,46 @@ macro_rules! serde_conv {
         #[allow(non_camel_case_types)]
         $vis struct $m;
 
-        #[allow(clippy::ptr_arg)]
-        impl $m {
-            $vis fn serialize<S>(x: &$t, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
-            where
-                S: $crate::serde::Serializer,
-            {
-                let y = $ser(x);
-                $crate::serde::Serialize::serialize(&y, serializer)
+        // Prevent clippy lints triggering because of the template here
+        // https://github.com/jonasbb/serde_with/pull/320
+        // https://github.com/jonasbb/serde_with/pull/729
+        #[allow(clippy::all)]
+        const _:() = {
+            impl $m {
+                $vis fn serialize<S>(x: &$t, serializer: S) -> $crate::__private__::Result<S::Ok, S::Error>
+                where
+                    S: $crate::serde::Serializer,
+                {
+                    let y = $ser(x);
+                    $crate::serde::Serialize::serialize(&y, serializer)
+                }
+
+                $vis fn deserialize<'de, D>(deserializer: D) -> $crate::__private__::Result<$t, D::Error>
+                where
+                    D: $crate::serde::Deserializer<'de>,
+                {
+                    let y = $crate::serde::Deserialize::deserialize(deserializer)?;
+                    $de(y).map_err($crate::serde::de::Error::custom)
+                }
             }
 
-            $vis fn deserialize<'de, D>(deserializer: D) -> ::std::result::Result<$t, D::Error>
-            where
-                D: $crate::serde::Deserializer<'de>,
-            {
-                let y = $crate::serde::Deserialize::deserialize(deserializer)?;
-                $de(y).map_err($crate::serde::de::Error::custom)
+            impl $crate::SerializeAs<$t> for $m {
+                fn serialize_as<S>(x: &$t, serializer: S) -> $crate::__private__::Result<S::Ok, S::Error>
+                where
+                    S: $crate::serde::Serializer,
+                {
+                    Self::serialize(x, serializer)
+                }
             }
-        }
 
-        impl $crate::SerializeAs<$t> for $m {
-            fn serialize_as<S>(x: &$t, serializer: S) -> ::std::result::Result<S::Ok, S::Error>
-            where
-                S: $crate::serde::Serializer,
-            {
-                Self::serialize(x, serializer)
+            impl<'de> $crate::DeserializeAs<'de, $t> for $m {
+                fn deserialize_as<D>(deserializer: D) -> $crate::__private__::Result<$t, D::Error>
+                where
+                    D: $crate::serde::Deserializer<'de>,
+                {
+                    Self::deserialize(deserializer)
+                }
             }
-        }
-
-        impl<'de> $crate::DeserializeAs<'de, $t> for $m {
-            fn deserialize_as<D>(deserializer: D) -> ::std::result::Result<$t, D::Error>
-            where
-                D: $crate::serde::Deserializer<'de>,
-            {
-                Self::deserialize(deserializer)
-            }
-        }
+        };
     };
 }

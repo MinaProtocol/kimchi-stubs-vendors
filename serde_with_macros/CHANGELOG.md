@@ -7,6 +7,210 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.9.0] - 2024-07-14
+
+No changes.
+
+## [3.8.3] - 2024-07-03
+
+No changes.
+
+## [3.8.2] - 2024-06-30
+
+No changes.
+
+## [3.8.1] - 2024-04-28
+
+No changes.
+
+## [3.8.0] - 2024-04-24
+
+No changes.
+
+## [3.7.0] - 2024-03-11
+
+### Fixed
+
+* Detect conflicting `schema_with` attributes on fields with `schemars` annotations by @swlynch99 (#715)
+    This extends the existing avoidance mechanism to a new variant fixing #712.
+
+## [3.6.1] - 2024-02-08
+
+No changes.
+
+## [3.6.0] - 2024-01-30
+
+No changes.
+
+## [3.5.1] - 2024-01-23
+
+### Fixed
+
+* The `serde_as` macro now better detects existing `schemars` attributes on fields and incorporates them (#682)
+    This avoids errors on existing `#[schemars(with = ...)]` annotations.
+
+## [3.5.0] - 2024-01-20
+
+### Added
+
+* Support for `schemars` integration added by @swlynch99 (#666)
+    The `serde_as` macro can now detect `schemars` usage and emits matching annotations for all fields with `serde_as` attribute.
+
+## [3.4.0] - 2023-10-17
+
+No changes.
+
+## [3.3.0] - 2023-08-19
+
+No changes.
+
+## [3.2.0] - 2023-08-04
+
+No changes.
+
+## [3.1.0] - 2023-07-17
+
+No changes.
+
+## [3.0.0] - 2023-05-01
+
+No changes.
+
+## [2.3.3] - 2023-04-27
+
+### Changed
+
+* Update `syn` to v2 and `darling` to v0.20 (#578)
+    Update proc-macro dependencies.
+    This change should have no impact on users, but now uses the same dependency as `serde_derive`.
+
+## [2.3.2] - 2023-04-05
+
+No changes.
+
+## [2.3.1] - 2023-03-10
+
+No changes.
+
+## [2.3.0] - 2023-03-09
+
+No changes.
+
+## [2.2.0] - 2023-01-09
+
+### Fixed
+
+* `serde_with::apply` had an issue matching types when invisible token groups where in use (#538)
+    The token groups can stem from macro_rules expansion, but should be treated mostly transparent.
+    The old code required a group to match a group, while now groups are silently removed when checking for type patterns.
+
+## [2.1.0] - 2022-11-16
+
+### Added
+
+* Add new `apply` attribute to simplify repetitive attributes over many fields.
+    Multiple rules and multiple attributes can be provided each.
+
+    ```rust
+    #[serde_with::apply(
+        Option => #[serde(default)] #[serde(skip_serializing_if = "Option::is_none")],
+        Option<bool> => #[serde(rename = "bool")],
+    )]
+    #[derive(serde::Serialize)]
+    struct Data {
+        a: Option<String>,
+        b: Option<u64>,
+        c: Option<String>,
+        d: Option<bool>,
+    }
+    ```
+
+    The `apply` attribute will expand into this, applying the attributes to the matching fields:
+
+    ```rust
+    #[derive(serde::Serialize)]
+    struct Data {
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        a: Option<String>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        b: Option<u64>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        c: Option<String>,
+        #[serde(default)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "bool")]
+        d: Option<bool>,
+    }
+    ```
+
+    The attribute supports field matching using many rules, such as `_` to apply to all fields and partial generics like `Option` to match any `Option` be it `Option<String>`, `Option<bool>`, or `Option<T>`.
+
+### Fixed
+
+* The derive macros `SerializeDisplay` and `DeserializeFromStr` now take better care not to use conflicting names for generic values. (#526)
+    All used generics now start with `__` to make conflicts with manually written code unlikely.
+
+    Thanks to @Elrendio for submitting a PR fixing the issue.
+
+## [2.0.1] - 2022-09-09
+
+### Changed
+
+* Warn if `serde_as` is used on an enum variant.
+    Attributes on enum variants were never supported.
+    But `#[serde(with = "...")]` can be added on variants, such that some confusion can occur when migration ([#499](https://github.com/jonasbb/serde_with/issues/499)).
+
+## [2.0.0] - 2022-07-17
+
+No changes compared to v2.0.0-rc.0.
+
+### Changed
+
+* Make `#[serde_as]` behave more intuitive on `Option<T>` fields.
+
+    The `#[serde_as]` macro now detects if a `#[serde_as(as = "Option<S>")]` is used on a field of type `Option<T>` and applies `#[serde(default)]` to the field.
+    This restores the ability to deserialize with missing fields and fixes a common annoyance (#183, #185, #311, #417).
+    This is a breaking change, since now deserialization will pass where it did not before and this might be undesired.
+
+    The `Option` field and transformation are detected by directly matching on the type name.
+    These variants are detected as `Option`.
+    * `Option`
+    * `std::option::Option`, with or without leading `::`
+    * `core::option::Option`, with or without leading `::`
+
+    If an existing `default` attribute is detected, the attribute is not applied again.
+    This behavior can be suppressed by using `#[serde_as(no_default)]` or `#[serde_as(as = "Option<S>", no_default)]`.
+
+### Fixed
+
+* Make the documentation clearer by stating that the `#[serde_as]` and `#[skip_serializing_none]` attributes must always be placed before `#[derive]`.
+
+## [2.0.0-rc.0] - 2022-06-29
+
+### Changed
+
+* Make `#[serde_as]` behave more intuitive on `Option<T>` fields.
+
+    The `#[serde_as]` macro now detects if a `#[serde_as(as = "Option<S>")]` is used on a field of type `Option<T>` and applies `#[serde(default)]` to the field.
+    This restores the ability to deserialize with missing fields and fixes a common annoyance (#183, #185, #311, #417).
+    This is a breaking change, since now deserialization will pass where it did not before and this might be undesired.
+
+    The `Option` field and transformation are detected by directly matching on the type name.
+    These variants are detected as `Option`.
+    * `Option`
+    * `std::option::Option`, with or without leading `::`
+    * `core::option::Option`, with or without leading `::`
+
+    If an existing `default` attribute is detected, the attribute is not applied again.
+    This behavior can be suppressed by using `#[serde_as(no_default)]` or `#[serde_as(as = "Option<S>", no_default)]`.
+
+### Fixed
+
+* Make the documentation clearer by stating that the `#[serde_as]` and `#[skip_serializing_none]` attributes must always be placed before `#[derive]`.
+
 ## [1.5.2] - 2022-04-07
 
 ### Fixed
@@ -58,7 +262,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
     This should have no effect on the generated code and on the runtime behavior.
     It eases integration of third-party crates with `serde_with`, since they can now process the `#[serde_as(...)]` field attributes reliably.
-    Before this was impossible for derive macros and lead to awkward ordering constraints on the attribute macros.
+    Before this, it was impossible for derive macros and lead to awkward ordering constraints on the attribute macros.
 
     Thanks to @Lehona for reporting this problem and to @dtolnay for suggesting the dummy derive macro.
 
@@ -90,7 +294,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
     This solves conflicts with `Result` if `Result` is not `std::result::Result`, e.g., a type alias.
     Additionally, the code assumed that `FromStr` was in scope, which is now also not required.
 
-    Thanks goes to @adwhit for reporting and fixing the problem in #186.
+    Thanks to @adwhit for reporting and fixing the problem in #186.
 
 ## [1.2.0] - 2020-10-01
 
@@ -98,7 +302,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 * Add `serde_as` macro. Refer to the `serde_with` crate for details.
 * Add two derive macros, `SerializeDisplay` and `DeserializeFromStr`, which implement the `Serialize`/`Deserialize` traits based on `Display` and `FromStr`.
-    This is in addition to the already existing methods like `DisplayFromStr`, which act locally, whereas the derive macros provide the traits expected by the rest of the ecosystem.
+  This is in addition to the pre-existing methods like `DisplayFromStr`, which act locally, whereas the derive macros provide the traits expected by the rest of the ecosystem.
 
 ### Changed
 
@@ -113,7 +317,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 
 * Add two derive macros, `SerializeDisplay` and `DeserializeFromStr`, which implement the `Serialize`/`Deserialize` traits based on `Display` and `FromStr`.
-    This is in addition to the already existing methods like `DisplayFromStr`, which act locally, whereas the derive macros provide the traits expected by the rest of the ecosystem.
+  This is in addition to the pre-existing methods like `DisplayFromStr`, which act locally, whereas the derive macros provide the traits expected by the rest of the ecosystem.
 
 ## [1.2.0-alpha.2] - 2020-08-08
 

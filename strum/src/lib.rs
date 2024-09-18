@@ -7,7 +7,7 @@
 //! Strum is a set of macros and traits for working with
 //! enums and strings easier in Rust.
 //!
-//! The full version of the README can be found on [Github](https://github.com/Peternator7/strum).
+//! The full version of the README can be found on [GitHub](https://github.com/Peternator7/strum).
 //!
 //! # Including Strum in Your Project
 //!
@@ -16,11 +16,11 @@
 //!
 //! ```toml
 //! [dependencies]
-//! strum = "0.24"
-//! strum_macros = "0.24"
+//! strum = "0.26"
+//! strum_macros = "0.26"
 //!
 //! # You can also access strum_macros exports directly through strum using the "derive" feature
-//! strum = { version = "0.24", features = ["derive"] }
+//! strum = { version = "0.26", features = ["derive"] }
 //! ```
 //!
 
@@ -29,6 +29,8 @@
 
 // only for documentation purposes
 pub mod additional_attributes;
+
+use core::iter::FusedIterator;
 
 #[cfg(feature = "phf")]
 #[doc(hidden)]
@@ -65,7 +67,7 @@ impl std::error::Error for ParseError {
 }
 
 /// This trait designates that an `Enum` can be iterated over. It can
-/// be auto generated using `strum_macros` on your behalf.
+/// be auto generated using the [`EnumIter`](derive.EnumIter.html) derive macro.
 ///
 /// # Example
 ///
@@ -96,9 +98,26 @@ impl std::error::Error for ParseError {
 /// generic_iterator::<Color, _>(|color| println!("{:?}", color));
 /// ```
 pub trait IntoEnumIterator: Sized {
+    type Iterator: Iterator<Item = Self>
+        + Clone
+        + DoubleEndedIterator
+        + ExactSizeIterator
+        + FusedIterator;
+
+    fn iter() -> Self::Iterator;
+}
+
+pub trait VariantIterator: Sized {
     type Iterator: Iterator<Item = Self>;
 
     fn iter() -> Self::Iterator;
+}
+
+pub trait VariantMetadata {
+    const VARIANT_COUNT: usize;
+    const VARIANT_NAMES: &'static [&'static str];
+
+    fn variant_name(&self) -> &'static str;
 }
 
 /// Associates additional pieces of information with an Enum. This can be
@@ -198,6 +217,16 @@ pub trait VariantNames {
     const VARIANTS: &'static [&'static str];
 }
 
+/// A trait for retrieving a static array containing all the variants in an Enum.
+/// This trait can be autoderived by `strum_macros`. For derived usage, all the
+/// variants in the enumerator need to be unit-types, which means you can't autoderive
+/// enums with inner data in one or more variants. Consider using it alongside
+/// [`EnumDiscriminants`] if you require inner data but still want to have an
+/// static array of variants.
+pub trait VariantArray: ::core::marker::Sized + 'static {
+    const VARIANTS: &'static [Self];
+}
+
 #[cfg(feature = "derive")]
 pub use strum_macros::*;
 
@@ -217,7 +246,6 @@ macro_rules! DocumentMacroRexports {
 // 2018 edition is almost 2 years old, but we'll need to give people some time to do that.
 DocumentMacroRexports! {
     AsRefStr,
-    AsStaticStr,
     Display,
     EnumCount,
     EnumDiscriminants,
@@ -225,8 +253,8 @@ DocumentMacroRexports! {
     EnumMessage,
     EnumProperty,
     EnumString,
-    EnumVariantNames,
+    VariantNames,
     FromRepr,
     IntoStaticStr,
-    ToString
+    VariantArray
 }

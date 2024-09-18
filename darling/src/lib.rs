@@ -38,7 +38,7 @@
 //! |`vis`|`syn::Visibility`|The visibility of the passed-in type|
 //! |`generics`|`T: darling::FromGenerics`|The generics of the passed-in type. This can be `syn::Generics`, `darling::ast::Generics`, or any compatible type.|
 //! |`data`|`darling::ast::Data`|The body of the passed-in type|
-//! |`attrs`|`Vec<syn::Attribute>`|The forwarded attributes from the passed in type. These are controlled using the `forward_attrs` attribute.|
+//! |`attrs`|`Vec<syn::Attribute>` (or anything, using `#[darling(with = ...)]`)|The forwarded attributes from the passed in type. These are controlled using the `forward_attrs` attribute.|
 //!
 //! ### `FromField`
 //! |Field name|Type|Meaning|
@@ -46,7 +46,7 @@
 //! |`ident`|`Option<syn::Ident>`|The identifier of the passed-in field, or `None` for tuple fields|
 //! |`vis`|`syn::Visibility`|The visibility of the passed-in field|
 //! |`ty`|`syn::Type`|The type of the passed-in field|
-//! |`attrs`|`Vec<syn::Attribute>`|The forwarded attributes from the passed in field. These are controlled using the `forward_attrs` attribute.|
+//! |`attrs`|`Vec<syn::Attribute>` (or anything, using `#[darling(with = ...)]`)|The forwarded attributes from the passed in field. These are controlled using the `forward_attrs` attribute.|
 //!
 //! ### `FromTypeParam`
 //! |Field name|Type|Meaning|
@@ -54,17 +54,16 @@
 //! |`ident`|`syn::Ident`|The identifier of the passed-in type param|
 //! |`bounds`|`Vec<syn::TypeParamBound>`|The bounds applied to the type param|
 //! |`default`|`Option<syn::Type>`|The default type of the parameter, if one exists|
-//! |`attrs`|`Vec<syn::Attribute>`|The forwarded attributes from the passed in type param. These are controlled using the `forward_attrs` attribute.|
+//! |`attrs`|`Vec<syn::Attribute>` (or anything, using `#[darling(with = ...)]`)|The forwarded attributes from the passed in type param. These are controlled using the `forward_attrs` attribute.|
 //!
 //! ### `FromVariant`
 //! |Field name|Type|Meaning|
 //! |---|---|---|
 //! |`ident`|`syn::Ident`|The identifier of the passed-in variant|
 //! |`discriminant`|`Option<syn::Expr>`|For a variant such as `Example = 2`, the `2`|
-//! |`fields`|`Option<darling::ast::Fields<__>>`|The fields associated with the variant|
-//! |`attrs`|`Vec<syn::Attribute>`|The forwarded attributes from the passed in variant. These are controlled using the `forward_attrs` attribute.|
-
-extern crate core;
+//! |`fields`|`darling::ast::Fields<T> where T: FromField`|The fields associated with the variant|
+//! |`attrs`|`Vec<syn::Attribute>` (or anything, using `#[darling(with = ...)]`)|The forwarded attributes from the passed in variant. These are controlled using the `forward_attrs` attribute.|
+#![warn(rust_2018_idioms)]
 
 #[allow(unused_imports)]
 #[macro_use]
@@ -99,8 +98,11 @@ pub mod export {
     pub use core::default::Default;
     pub use core::option::Option::{self, None, Some};
     pub use core::result::Result::{self, Err, Ok};
+    pub use darling_core::syn;
     pub use std::string::ToString;
     pub use std::vec::Vec;
+
+    pub use crate::ast::NestedMeta;
 }
 
 #[macro_use]

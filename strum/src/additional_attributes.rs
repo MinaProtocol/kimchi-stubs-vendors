@@ -17,13 +17,12 @@
 //!   - `UPPERCASE`
 //!   - `title_case`
 //!   - `mixed_case`
+//!   - `Train-Case`
 //!
 //!   ```rust
-//!   use std::string::ToString;
-//!   use strum;
 //!   use strum_macros;
 //!   
-//!   #[derive(Debug, Eq, PartialEq, strum_macros::ToString)]
+//!   #[derive(Debug, Eq, PartialEq, strum_macros::Display)]
 //!   #[strum(serialize_all = "snake_case")]
 //!   enum Brightness {
 //!       DarkBlack,
@@ -79,7 +78,7 @@
 //!
 //! - `ascii_case_insensitive`: makes the comparison to this variant case insensitive (ASCII only).
 //!   If the whole enum is marked `ascii_case_insensitive`, you can specify `ascii_case_insensitive = false`
-//!   to disable case insensitivity on this v ariant.
+//!   to disable case insensitivity on this variant.
 //!
 //! - `message=".."`: Adds a message to enum variant. This is used in conjunction with the `EnumMessage`
 //!    trait to associate a message with a variant. If `detailed_message` is not provided,

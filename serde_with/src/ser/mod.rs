@@ -7,16 +7,18 @@
 //!
 //! [user guide]: crate::guide
 
-mod const_arrays;
-#[macro_use]
+#[cfg(feature = "alloc")]
+mod duplicates;
 mod impls;
+#[cfg(feature = "alloc")]
+mod skip_error;
 
-use super::*;
+use crate::prelude::*;
 
 /// A **data structure** that can be serialized into any data format supported by Serde, analogue to [`Serialize`].
 ///
 /// The trait is analogue to the [`serde::Serialize`][`Serialize`] trait, with the same meaning of input and output arguments.
-/// It can and should the implemented using the same code structure as the [`Serialize`] trait.
+/// It can and should be implemented using the same code structure as the [`Serialize`] trait.
 /// As such, the same advice for [implementing `Serialize`][impl-serialize] applies here.
 ///
 /// # Differences to [`Serialize`]
@@ -60,7 +62,7 @@ use super::*;
 /// ```
 ///
 /// It uses two type parameters, `T` and `U` instead of only one and performs the serialization step using the `SerializeAsWrap` type.
-/// The `T` type is the on the Rust side before serialization, whereas the `U` type determines how the value will be serialized.
+/// The `T` type is the type on the Rust side before serialization, whereas the `U` type determines how the value will be serialized.
 /// These two changes are usually enough to make a container type implement [`SerializeAs`][].
 ///
 /// [`SerializeAsWrap`] is a piece of glue code which turns [`SerializeAs`] into a serde compatible datatype, by converting all calls to `serialize` into `serialize_as`.
@@ -73,8 +75,8 @@ use super::*;
 /// This shows a simplified implementation for [`DisplayFromStr`].
 ///
 /// ```rust
-/// # #[cfg(all(feature = "macros"))] {
-/// # use serde_with::SerializeAs;
+/// # #[cfg(feature = "macros")] {
+/// # use serde_with::{serde_as, SerializeAs};
 /// # use std::fmt::Display;
 /// struct DisplayFromStr;
 ///
@@ -90,7 +92,7 @@ use super::*;
 ///     }
 /// }
 /// #
-/// # #[serde_with::serde_as]
+/// # #[serde_as]
 /// # #[derive(serde::Serialize)]
 /// # struct S (#[serde_as(as = "DisplayFromStr")] bool);
 /// #
@@ -112,7 +114,6 @@ pub trait SerializeAs<T: ?Sized> {
 }
 
 /// Helper type to implement [`SerializeAs`] for container-like types.
-#[derive(Debug)]
 pub struct SerializeAsWrap<'a, T: ?Sized, U: ?Sized> {
     value: &'a T,
     marker: PhantomData<U>,
@@ -154,5 +155,21 @@ where
 {
     fn from(value: &'a T) -> Self {
         Self::new(value)
+    }
+}
+
+impl<T: ?Sized> As<T> {
+    /// Serialize type `T` using [`SerializeAs`][]
+    ///
+    /// The function signature is compatible with [serde's `with` annotation][with-annotation].
+    ///
+    /// [with-annotation]: https://serde.rs/field-attrs.html#with
+    pub fn serialize<S, I>(value: &I, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: SerializeAs<I>,
+        I: ?Sized,
+    {
+        T::serialize_as(value, serializer)
     }
 }
