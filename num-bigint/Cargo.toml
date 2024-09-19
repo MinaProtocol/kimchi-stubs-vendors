@@ -12,20 +12,39 @@
 [package]
 edition = "2018"
 name = "num-bigint"
-version = "0.4.3"
+version = "0.4.4"
 authors = ["The Rust Project Developers"]
 build = "build.rs"
-exclude = ["/bors.toml", "/ci/*", "/.github/*"]
+exclude = [
+    "/bors.toml",
+    "/ci/*",
+    "/.github/*",
+]
 description = "Big integer implementation for Rust"
 homepage = "https://github.com/rust-num/num-bigint"
 documentation = "https://docs.rs/num-bigint"
 readme = "README.md"
-keywords = ["mathematics", "numerics", "bignum"]
-categories = ["algorithms", "data-structures", "science"]
+keywords = [
+    "mathematics",
+    "numerics",
+    "bignum",
+]
+categories = [
+    "algorithms",
+    "data-structures",
+    "science",
+]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/rust-num/num-bigint"
+
 [package.metadata.docs.rs]
-features = ["std", "serde", "rand", "quickcheck", "arbitrary"]
+features = [
+    "std",
+    "serde",
+    "rand",
+    "quickcheck",
+    "arbitrary",
+]
 
 [[bench]]
 name = "bigint"
@@ -42,6 +61,7 @@ name = "roots"
 [[bench]]
 name = "shootout-pidigits"
 harness = false
+
 [dependencies.arbitrary]
 version = "1"
 optional = true
@@ -53,7 +73,7 @@ features = ["i128"]
 default-features = false
 
 [dependencies.num-traits]
-version = "0.2.11"
+version = "0.2.16"
 features = ["i128"]
 default-features = false
 
@@ -71,9 +91,13 @@ default-features = false
 version = "1.0"
 optional = true
 default-features = false
+
 [build-dependencies.autocfg]
 version = "1"
 
 [features]
 default = ["std"]
-std = ["num-integer/std", "num-traits/std"]
+std = [
+    "num-integer/std",
+    "num-traits/std",
+]

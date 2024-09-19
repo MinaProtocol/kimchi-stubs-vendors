@@ -10,7 +10,7 @@ use core::cmp::Ordering::{Equal, Greater, Less};
 #[cfg(has_try_from)]
 use core::convert::TryFrom;
 use core::str::{self, FromStr};
-use num_traits::{FromPrimitive, Num, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, Num, One, ToPrimitive, Zero};
 
 impl FromStr for BigInt {
     type Err = ParseBigIntError;
@@ -24,7 +24,7 @@ impl FromStr for BigInt {
 impl Num for BigInt {
     type FromStrRadixErr = ParseBigIntError;
 
-    /// Creates and initializes a BigInt.
+    /// Creates and initializes a [`BigInt`].
     #[inline]
     fn from_str_radix(mut s: &str, radix: u32) -> Result<BigInt, ParseBigIntError> {
         let sign = if s.starts_with('-') {
@@ -367,6 +367,16 @@ impl_to_bigint!(u128, FromPrimitive::from_u128);
 impl_to_bigint!(f32, FromPrimitive::from_f32);
 impl_to_bigint!(f64, FromPrimitive::from_f64);
 
+impl From<bool> for BigInt {
+    fn from(x: bool) -> Self {
+        if x {
+            One::one()
+        } else {
+            Zero::zero()
+        }
+    }
+}
+
 #[inline]
 pub(super) fn from_signed_bytes_be(digits: &[u8]) -> BigInt {
     let sign = match digits.first() {
@@ -379,7 +389,7 @@ pub(super) fn from_signed_bytes_be(digits: &[u8]) -> BigInt {
         // two's-complement the content to retrieve the magnitude
         let mut digits = Vec::from(digits);
         twos_complement_be(&mut digits);
-        BigInt::from_biguint(sign, BigUint::from_bytes_be(&*digits))
+        BigInt::from_biguint(sign, BigUint::from_bytes_be(&digits))
     } else {
         BigInt::from_biguint(sign, BigUint::from_bytes_be(digits))
     }
@@ -397,7 +407,7 @@ pub(super) fn from_signed_bytes_le(digits: &[u8]) -> BigInt {
         // two's-complement the content to retrieve the magnitude
         let mut digits = Vec::from(digits);
         twos_complement_le(&mut digits);
-        BigInt::from_biguint(sign, BigUint::from_bytes_le(&*digits))
+        BigInt::from_biguint(sign, BigUint::from_bytes_le(&digits))
     } else {
         BigInt::from_biguint(sign, BigUint::from_bytes_le(digits))
     }

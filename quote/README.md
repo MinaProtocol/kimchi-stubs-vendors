@@ -84,8 +84,7 @@ let tokens = quote! {
 Repetition is done using `#(...)*` or `#(...),*` similar to `macro_rules!`. This
 iterates through the elements of any variable interpolated within the repetition
 and inserts a copy of the repetition body for each one. The variables in an
-interpolation may be anything that implements `IntoIterator`, including `Vec` or
-a pre-existing iterator.
+interpolation may be a `Vec`, slice, `BTreeSet`, or any `Iterator`.
 
 - `#(#var)*` — no separators
 - `#(#var),*` — the character before the asterisk is used as a separator
@@ -239,6 +238,18 @@ convenient for a human to read and debug.
 
 Be aware that no kind of hygiene or span information is retained when tokens are
 written to a file; the conversion from tokens to source code is lossy.
+
+Example usage in build.rs:
+
+```rust
+let output = quote! { ... };
+let syntax_tree = syn::parse2(output).unwrap();
+let formatted = prettyplease::unparse(&syntax_tree);
+
+let out_dir = env::var_os("OUT_DIR").unwrap();
+let dest_path = Path::new(&out_dir).join("out.rs");
+fs::write(dest_path, formatted).unwrap();
+```
 
 [prettyplease]: https://github.com/dtolnay/prettyplease
 

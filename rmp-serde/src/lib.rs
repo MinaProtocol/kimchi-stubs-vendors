@@ -12,7 +12,7 @@
 //!     buf
 //! );
 //!
-//! assert_eq!((42, "the Answer"), rmp_serde::from_read_ref(&buf).unwrap());
+//! assert_eq!((42, "the Answer"), rmp_serde::from_slice(&buf).unwrap());
 //! ```
 //!
 //! # Type-based Serialization and Deserialization
@@ -327,8 +327,8 @@ impl<'a> Serialize for RawRef<'a> {
         S: serde::Serializer,
     {
         match self.s {
-            Ok(ref s) => se.serialize_str(s),
-            Err((ref b, ..)) => se.serialize_bytes(b),
+            Ok(s) => se.serialize_str(s),
+            Err((b, ..)) => se.serialize_bytes(b),
         }
     }
 }
