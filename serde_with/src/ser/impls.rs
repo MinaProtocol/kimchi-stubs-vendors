@@ -1,33 +1,107 @@
-use super::*;
-use crate::{
-    formats::Strictness, rust::StringWithSeparator, utils::duration::DurationSigned, Separator,
-};
-use alloc::{
-    borrow::Cow,
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque},
-    rc::{Rc, Weak as RcWeak},
-    string::{String, ToString},
-    sync::{Arc, Weak as ArcWeak},
-    vec::Vec,
-};
-use core::{
-    cell::{Cell, RefCell},
-    convert::TryInto,
-    fmt::Display,
-    time::Duration,
-};
-#[cfg(feature = "indexmap")]
-use indexmap_crate::{IndexMap, IndexSet};
-use serde::ser::Error;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Mutex, RwLock},
-    time::SystemTime,
-};
+pub(crate) use self::macros::*;
+use crate::{formats::Strictness, prelude::*};
+#[cfg(feature = "hashbrown_0_14")]
+use hashbrown_0_14::{HashMap as HashbrownMap014, HashSet as HashbrownSet014};
+#[cfg(feature = "indexmap_1")]
+use indexmap_1::{IndexMap, IndexSet};
+#[cfg(feature = "indexmap_2")]
+use indexmap_2::{IndexMap as IndexMap2, IndexSet as IndexSet2};
+
+///////////////////////////////////////////////////////////////////////////////
+// Helper macro used internally
+
+#[cfg(feature = "alloc")]
+type BoxedSlice<T> = Box<[T]>;
+type Slice<T> = [T];
+type Ref<'a, T> = &'a T;
+type RefMut<'a, T> = &'a mut T;
+
+pub(crate) mod macros {
+    // The unused_imports lint has false-positives around macros
+    // https://github.com/rust-lang/rust/issues/78894
+    #![allow(unused_imports)]
+
+    macro_rules! foreach_map {
+    ($m:ident) => {
+        #[cfg(feature = "alloc")]
+        $m!(BTreeMap<K, V>);
+        #[cfg(feature = "std")]
+        $m!(HashMap<K, V, H: Sized>);
+        #[cfg(feature = "hashbrown_0_14")]
+        $m!(HashbrownMap014<K, V, H: Sized>);
+        #[cfg(feature = "indexmap_1")]
+        $m!(IndexMap<K, V, H: Sized>);
+        #[cfg(feature = "indexmap_2")]
+        $m!(IndexMap2<K, V, H: Sized>);
+    };
+}
+
+    macro_rules! foreach_set {
+    ($m:ident, $T:tt) => {
+        #[cfg(feature = "alloc")]
+        $m!(BTreeSet<$T>);
+        #[cfg(feature = "std")]
+        $m!(HashSet<$T, H: Sized>);
+        #[cfg(feature = "hashbrown_0_14")]
+        $m!(HashbrownSet014<$T, H: Sized>);
+        #[cfg(feature = "indexmap_1")]
+        $m!(IndexSet<$T, H: Sized>);
+        #[cfg(feature = "indexmap_2")]
+        $m!(IndexSet2<$T, H: Sized>);
+    };
+    ($m:ident) => {
+        foreach_set!($m, T);
+    };
+}
+
+    macro_rules! foreach_seq {
+        ($m:ident, $T:tt) => {
+            foreach_set!($m, $T);
+
+            $m!(Slice<$T>);
+
+            #[cfg(feature = "alloc")]
+            $m!(BinaryHeap<$T>);
+            #[cfg(feature = "alloc")]
+            $m!(BoxedSlice<$T>);
+            #[cfg(feature = "alloc")]
+            $m!(LinkedList<$T>);
+            #[cfg(feature = "alloc")]
+            $m!(Vec<$T>);
+            #[cfg(feature = "alloc")]
+            $m!(VecDeque<$T>);
+        };
+        ($m:
+            ident) => {
+            foreach_seq!($m, T);
+        };
+    }
+
+    // Make the macros available to the rest of the crate
+    pub(crate) use foreach_map;
+    pub(crate) use foreach_seq;
+    pub(crate) use foreach_set;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // region: Simple Wrapper types (e.g., Box, Option)
+
+#[allow(unused_macros)]
+macro_rules! pinned_wrapper {
+    ($wrapper:ident $($lifetime:lifetime)?) => {
+        impl<$($lifetime,)? T, U> SerializeAs<Pin<$wrapper<$($lifetime,)? T>>> for Pin<$wrapper<$($lifetime,)? U>>
+        where
+            U: SerializeAs<T>,
+        {
+            fn serialize_as<S>(source: &Pin<$wrapper<$($lifetime,)? T>>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                SerializeAsWrap::<T, U>::new(source).serialize(serializer)
+            }
+        }
+    };
+}
 
 impl<'a, T, U> SerializeAs<&'a T> for &'a U
 where
@@ -57,6 +131,10 @@ where
     }
 }
 
+pinned_wrapper!(Ref 'a);
+pinned_wrapper!(RefMut 'a);
+
+#[cfg(feature = "alloc")]
 impl<T, U> SerializeAs<Box<T>> for Box<U>
 where
     U: SerializeAs<T>,
@@ -68,6 +146,9 @@ where
         SerializeAsWrap::<T, U>::new(source).serialize(serializer)
     }
 }
+
+#[cfg(feature = "alloc")]
+pinned_wrapper!(Box);
 
 impl<T, U> SerializeAs<Option<T>> for Option<U>
 where
@@ -84,6 +165,25 @@ where
     }
 }
 
+impl<T, U> SerializeAs<Bound<T>> for Bound<U>
+where
+    U: SerializeAs<T>,
+    T: Sized,
+{
+    fn serialize_as<S>(source: &Bound<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match source {
+            Bound::Unbounded => Bound::Unbounded,
+            Bound::Included(ref v) => Bound::Included(SerializeAsWrap::<T, U>::new(v)),
+            Bound::Excluded(ref v) => Bound::Excluded(SerializeAsWrap::<T, U>::new(v)),
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl<T, U> SerializeAs<Rc<T>> for Rc<U>
 where
     U: SerializeAs<T>,
@@ -96,6 +196,10 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
+pinned_wrapper!(Rc);
+
+#[cfg(feature = "alloc")]
 impl<T, U> SerializeAs<RcWeak<T>> for RcWeak<U>
 where
     U: SerializeAs<T>,
@@ -109,6 +213,7 @@ where
     }
 }
 
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 impl<T, U> SerializeAs<Arc<T>> for Arc<U>
 where
     U: SerializeAs<T>,
@@ -121,6 +226,10 @@ where
     }
 }
 
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
+pinned_wrapper!(Arc);
+
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 impl<T, U> SerializeAs<ArcWeak<T>> for ArcWeak<U>
 where
     U: SerializeAs<T>,
@@ -162,6 +271,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<T, U> SerializeAs<Mutex<T>> for Mutex<U>
 where
     U: SerializeAs<T>,
@@ -177,6 +287,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<T, U> SerializeAs<RwLock<T>> for RwLock<U>
 where
     U: SerializeAs<T>,
@@ -209,6 +320,22 @@ where
     }
 }
 
+impl<T, As, const N: usize> SerializeAs<[T; N]> for [As; N]
+where
+    As: SerializeAs<T>,
+{
+    fn serialize_as<S>(array: &[T; N], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut arr = serializer.serialize_tuple(N)?;
+        for elem in array {
+            arr.serialize_element(&SerializeAsWrap::<T, As>::new(elem))?;
+        }
+        arr.end()
+    }
+}
+
 // endregion
 ///////////////////////////////////////////////////////////////////////////////
 // region: Collection Types (e.g., Maps, Sets, Vec)
@@ -230,27 +357,15 @@ macro_rules! seq_impl {
         }
     }
 }
+foreach_seq!(seq_impl);
 
-type BoxedSlice<T> = Box<[T]>;
-type Slice<T> = [T];
-seq_impl!(BinaryHeap<T>);
-seq_impl!(BoxedSlice<T>);
-seq_impl!(BTreeSet<T>);
-seq_impl!(HashSet<T, H: Sized>);
-seq_impl!(LinkedList<T>);
-seq_impl!(Slice<T>);
-seq_impl!(Vec<T>);
-seq_impl!(VecDeque<T>);
-#[cfg(feature = "indexmap")]
-seq_impl!(IndexSet<T, H: Sized>);
-
+#[cfg(feature = "alloc")]
 macro_rules! map_impl {
-    ($ty:ident < K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V $(, $typaram:ident : $bound:ident)* >) => {
+    ($ty:ident < K, V $(, $typaram:ident : $bound:ident)* >) => {
         impl<K, KU, V, VU $(, $typaram)*> SerializeAs<$ty<K, V $(, $typaram)*>> for $ty<KU, VU $(, $typaram)*>
         where
             KU: SerializeAs<K>,
             VU: SerializeAs<V>,
-            $(K: ?Sized + $kbound1 $(+ $kbound2)*,)*
             $($typaram: ?Sized + $bound,)*
         {
             fn serialize_as<S>(source: &$ty<K, V $(, $typaram)*>, serializer: S) -> Result<S::Ok, S::Error>
@@ -262,11 +377,7 @@ macro_rules! map_impl {
         }
     }
 }
-
-map_impl!(BTreeMap<K, V>);
-map_impl!(HashMap<K, V, H: Sized>);
-#[cfg(feature = "indexmap")]
-map_impl!(IndexMap<K, V, H: Sized>);
+foreach_map!(map_impl);
 
 macro_rules! tuple_impl {
     ($len:literal $($n:tt $t:ident $tas:ident)+) => {
@@ -306,14 +417,16 @@ tuple_impl!(14 0 T0 As0 1 T1 As1 2 T2 As2 3 T3 As3 4 T4 As4 5 T5 As5 6 T6 As6 7 
 tuple_impl!(15 0 T0 As0 1 T1 As1 2 T2 As2 3 T3 As3 4 T4 As4 5 T5 As5 6 T6 As6 7 T7 As7 8 T8 As8 9 T9 As9 10 T10 As10 11 T11 As11 12 T12 As12 13 T13 As13 14 T14 As14);
 tuple_impl!(16 0 T0 As0 1 T1 As1 2 T2 As2 3 T3 As3 4 T4 As4 5 T5 As5 6 T6 As6 7 T7 As7 8 T8 As8 9 T9 As9 10 T10 As10 11 T11 As11 12 T12 As12 13 T13 As13 14 T14 As14 15 T15 As15);
 
-macro_rules! map_as_tuple_seq {
-    ($ty:ident < K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V >) => {
-        impl<K, KAs, V, VAs> SerializeAs<$ty<K, V>> for Vec<(KAs, VAs)>
+#[cfg(feature = "alloc")]
+macro_rules! map_as_tuple_seq_intern {
+    ($tyorig:ident < K, V $(, $typaram:ident : $bound:ident)* >, $ty:ident <(K, V)>) => {
+        impl<K, KAs, V, VAs $(, $typaram)*> SerializeAs<$tyorig<K, V $(, $typaram)*>> for $ty<(KAs, VAs)>
         where
             KAs: SerializeAs<K>,
             VAs: SerializeAs<V>,
+            $($typaram: ?Sized + $bound,)*
         {
-            fn serialize_as<S>(source: &$ty<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+            fn serialize_as<S>(source: &$tyorig<K, V $(, $typaram)*>, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: Serializer,
             {
@@ -327,11 +440,78 @@ macro_rules! map_as_tuple_seq {
         }
     };
 }
-map_as_tuple_seq!(BTreeMap<K, V>);
-// TODO HashMap with a custom hasher support would be better, but results in "unconstrained type parameter"
-map_as_tuple_seq!(HashMap<K, V>);
-#[cfg(feature = "indexmap")]
-map_as_tuple_seq!(IndexMap<K, V>);
+#[cfg(feature = "alloc")]
+macro_rules! map_as_tuple_seq {
+    ($tyorig:ident < K, V $(, $typaram:ident : $bound:ident)* >) => {
+        map_as_tuple_seq_intern!($tyorig<K, V $(, $typaram: $bound)* >, Seq<(K, V)>);
+        #[cfg(feature = "alloc")]
+        map_as_tuple_seq_intern!($tyorig<K, V $(, $typaram: $bound)* >, Vec<(K, V)>);
+    }
+}
+foreach_map!(map_as_tuple_seq);
+
+macro_rules! tuple_seq_as_map_impl_intern {
+    ($tyorig:ident < (K, V) $(, $typaram:ident : $bound:ident)* >, $ty:ident <K, V>) => {
+        #[allow(clippy::implicit_hasher)]
+        impl<K, KAs, V, VAs $(, $typaram)*> SerializeAs<$tyorig<(K, V) $(, $typaram)*>> for $ty<KAs, VAs>
+        where
+            KAs: SerializeAs<K>,
+            VAs: SerializeAs<V>,
+            $($typaram: ?Sized + $bound,)*
+        {
+            fn serialize_as<S>(source: &$tyorig<(K, V) $(, $typaram)*>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.collect_map(source.iter().map(|(k, v)| {
+                    (
+                        SerializeAsWrap::<K, KAs>::new(k),
+                        SerializeAsWrap::<V, VAs>::new(v),
+                    )
+                }))
+            }
+        }
+    };
+}
+macro_rules! tuple_seq_as_map_impl {
+    ($tyorig:ident < (K, V) $(, $typaram:ident : $bound:ident)* >) => {
+        tuple_seq_as_map_impl_intern!($tyorig<(K, V) $(, $typaram: $bound)* >, Map<K, V>);
+        #[cfg(feature = "alloc")]
+        tuple_seq_as_map_impl_intern!($tyorig<(K, V) $(, $typaram: $bound)* >, BTreeMap<K, V>);
+        #[cfg(feature = "std")]
+        tuple_seq_as_map_impl_intern!($tyorig<(K, V) $(, $typaram: $bound)* >, HashMap<K, V>);
+    }
+}
+foreach_seq!(tuple_seq_as_map_impl, (K, V));
+tuple_seq_as_map_impl!(Option<(K, V)>);
+
+macro_rules! tuple_seq_as_map_arr {
+    ($tyorig:ty, $ty:ident <K, V>) => {
+        #[allow(clippy::implicit_hasher)]
+        impl<K, KAs, V, VAs, const N: usize> SerializeAs<$tyorig> for $ty<KAs, VAs>
+        where
+            KAs: SerializeAs<K>,
+            VAs: SerializeAs<V>,
+        {
+            fn serialize_as<S>(source: &$tyorig, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.collect_map(source.iter().map(|(k, v)| {
+                    (
+                        SerializeAsWrap::<K, KAs>::new(k),
+                        SerializeAsWrap::<V, VAs>::new(v),
+                    )
+                }))
+            }
+        }
+    };
+}
+tuple_seq_as_map_arr!([(K, V); N], Map<K, V>);
+#[cfg(feature = "alloc")]
+tuple_seq_as_map_arr!([(K, V); N], BTreeMap<K, V>);
+#[cfg(feature = "std")]
+tuple_seq_as_map_arr!([(K, V); N], HashMap<K, V>);
 
 // endregion
 ///////////////////////////////////////////////////////////////////////////////
@@ -357,75 +537,45 @@ where
     where
         S: Serializer,
     {
-        crate::rust::display_fromstr::serialize(source, serializer)
+        serializer.collect_str(source)
     }
 }
 
-impl<T, U> SerializeAs<Vec<T>> for VecSkipError<U>
+impl<T, H, F> SerializeAs<T> for IfIsHumanReadable<H, F>
 where
-    U: SerializeAs<T>,
+    T: ?Sized,
+    H: SerializeAs<T>,
+    F: SerializeAs<T>,
 {
-    fn serialize_as<S>(source: &Vec<T>, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_as<S>(source: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        Vec::<U>::serialize_as(source, serializer)
-    }
-}
-
-impl<AsRefStr> SerializeAs<Option<AsRefStr>> for NoneAsEmptyString
-where
-    AsRefStr: AsRef<str>,
-{
-    fn serialize_as<S>(source: &Option<AsRefStr>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        crate::rust::string_empty_as_none::serialize(source, serializer)
-    }
-}
-
-macro_rules! tuple_seq_as_map_impl_intern {
-    ($tyorig:ty, $ty:ident <K, V>) => {
-        #[allow(clippy::implicit_hasher)]
-        impl<K, KAs, V, VAs> SerializeAs<$tyorig> for $ty<KAs, VAs>
-        where
-            KAs: SerializeAs<K>,
-            VAs: SerializeAs<V>,
-        {
-            fn serialize_as<S>(source: &$tyorig, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: Serializer,
-            {
-                serializer.collect_map(source.iter().map(|(k, v)| {
-                    (
-                        SerializeAsWrap::<K, KAs>::new(k),
-                        SerializeAsWrap::<V, VAs>::new(v),
-                    )
-                }))
-            }
+        if serializer.is_human_readable() {
+            H::serialize_as(source, serializer)
+        } else {
+            F::serialize_as(source, serializer)
         }
-    };
-}
-macro_rules! tuple_seq_as_map_impl {
-    ($($ty:ty $(,)?)+) => {$(
-        tuple_seq_as_map_impl_intern!($ty, BTreeMap<K, V>);
-        tuple_seq_as_map_impl_intern!($ty, HashMap<K, V>);
-    )+}
+    }
 }
 
-tuple_seq_as_map_impl! {
-    BinaryHeap<(K, V)>,
-    BTreeSet<(K, V)>,
-    LinkedList<(K, V)>,
-    Option<(K, V)>,
-    Vec<(K, V)>,
-    VecDeque<(K, V)>,
+impl<T> SerializeAs<Option<T>> for NoneAsEmptyString
+where
+    T: Display,
+{
+    fn serialize_as<S>(source: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(value) = source {
+            serializer.collect_str(value)
+        } else {
+            serializer.serialize_str("")
+        }
+    }
 }
-tuple_seq_as_map_impl!(HashSet<(K, V)>);
-#[cfg(feature = "indexmap")]
-tuple_seq_as_map_impl!(IndexSet<(K, V)>);
 
+#[cfg(feature = "alloc")]
 impl<T, TAs> SerializeAs<T> for DefaultOnError<TAs>
 where
     TAs: SerializeAs<T>,
@@ -438,6 +588,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl SerializeAs<Vec<u8>> for BytesOrString {
     fn serialize_as<S>(source: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -449,25 +600,49 @@ impl SerializeAs<Vec<u8>> for BytesOrString {
 
 impl<SEPARATOR, I, T> SerializeAs<I> for StringWithSeparator<SEPARATOR, T>
 where
-    SEPARATOR: Separator,
-    for<'a> &'a I: IntoIterator<Item = &'a T>,
-    T: ToString,
+    SEPARATOR: formats::Separator,
+    for<'x> &'x I: IntoIterator<Item = &'x T>,
+    T: Display,
+    // This set of bounds is enough to make the function compile but has inference issues
+    // making it unusable at the moment.
+    // https://github.com/rust-lang/rust/issues/89196#issuecomment-932024770
+    // for<'x> &'x I: IntoIterator,
+    // for<'x> <&'x I as IntoIterator>::Item: Display,
 {
     fn serialize_as<S>(source: &I, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut s = String::new();
-        for v in source {
-            s.push_str(&*v.to_string());
-            s.push_str(SEPARATOR::separator());
+        pub(crate) struct DisplayWithSeparator<'a, I, SEPARATOR>(&'a I, PhantomData<SEPARATOR>);
+
+        impl<'a, I, SEPARATOR> DisplayWithSeparator<'a, I, SEPARATOR> {
+            pub(crate) fn new(iter: &'a I) -> Self {
+                Self(iter, PhantomData)
+            }
         }
-        serializer.serialize_str(if !s.is_empty() {
-            // remove trailing separator if present
-            &s[..s.len() - SEPARATOR::separator().len()]
-        } else {
-            &s[..]
-        })
+
+        impl<'a, I, SEPARATOR> Display for DisplayWithSeparator<'a, I, SEPARATOR>
+        where
+            SEPARATOR: formats::Separator,
+            &'a I: IntoIterator,
+            <&'a I as IntoIterator>::Item: Display,
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let mut iter = self.0.into_iter();
+
+                if let Some(first) = iter.next() {
+                    first.fmt(f)?;
+                }
+                for elem in iter {
+                    f.write_str(SEPARATOR::separator())?;
+                    elem.fmt(f)?;
+                }
+
+                Ok(())
+            }
+        }
+
+        serializer.collect_str(&DisplayWithSeparator::<I, SEPARATOR>::new(source))
     }
 }
 
@@ -515,6 +690,16 @@ use_signed_duration!(
         Duration =>
         {u64, STRICTNESS => STRICTNESS: Strictness}
         {f64, STRICTNESS => STRICTNESS: Strictness}
+    }
+);
+#[cfg(feature = "alloc")]
+use_signed_duration!(
+    DurationSeconds DurationSeconds,
+    DurationMilliSeconds DurationMilliSeconds,
+    DurationMicroSeconds DurationMicroSeconds,
+    DurationNanoSeconds DurationNanoSeconds,
+    => {
+        Duration =>
         {String, STRICTNESS => STRICTNESS: Strictness}
     }
 );
@@ -526,10 +711,21 @@ use_signed_duration!(
     => {
         Duration =>
         {f64, STRICTNESS => STRICTNESS: Strictness}
+    }
+);
+#[cfg(feature = "alloc")]
+use_signed_duration!(
+    DurationSecondsWithFrac DurationSecondsWithFrac,
+    DurationMilliSecondsWithFrac DurationMilliSecondsWithFrac,
+    DurationMicroSecondsWithFrac DurationMicroSecondsWithFrac,
+    DurationNanoSecondsWithFrac DurationNanoSecondsWithFrac,
+    => {
+        Duration =>
         {String, STRICTNESS => STRICTNESS: Strictness}
     }
 );
 
+#[cfg(feature = "std")]
 use_signed_duration!(
     TimestampSeconds DurationSeconds,
     TimestampMilliSeconds DurationMilliSeconds,
@@ -542,6 +738,7 @@ use_signed_duration!(
         {String, STRICTNESS => STRICTNESS: Strictness}
     }
 );
+#[cfg(feature = "std")]
 use_signed_duration!(
     TimestampSecondsWithFrac DurationSecondsWithFrac,
     TimestampMilliSecondsWithFrac DurationMilliSecondsWithFrac,
@@ -575,6 +772,7 @@ impl SerializeAs<&[u8]> for Bytes {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl SerializeAs<Vec<u8>> for Bytes {
     fn serialize_as<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -584,6 +782,7 @@ impl SerializeAs<Vec<u8>> for Bytes {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl SerializeAs<Box<[u8]>> for Bytes {
     fn serialize_as<S>(bytes: &Box<[u8]>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -593,6 +792,7 @@ impl SerializeAs<Box<[u8]>> for Bytes {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'a> SerializeAs<Cow<'a, [u8]>> for Bytes {
     fn serialize_as<S>(bytes: &Cow<'a, [u8]>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -602,6 +802,45 @@ impl<'a> SerializeAs<Cow<'a, [u8]>> for Bytes {
     }
 }
 
+impl<const N: usize> SerializeAs<[u8; N]> for Bytes {
+    fn serialize_as<S>(bytes: &[u8; N], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(bytes)
+    }
+}
+
+impl<const N: usize> SerializeAs<&[u8; N]> for Bytes {
+    fn serialize_as<S>(bytes: &&[u8; N], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(*bytes)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<const N: usize> SerializeAs<Box<[u8; N]>> for Bytes {
+    fn serialize_as<S>(bytes: &Box<[u8; N]>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&**bytes)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, const N: usize> SerializeAs<Cow<'a, [u8; N]>> for Bytes {
+    fn serialize_as<S>(bytes: &Cow<'a, [u8; N]>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(bytes.as_ref())
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl<T, U> SerializeAs<Vec<T>> for OneOrMany<U, formats::PreferOne>
 where
     U: SerializeAs<T>,
@@ -618,6 +857,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, U> SerializeAs<Vec<T>> for OneOrMany<U, formats::PreferMany>
 where
     U: SerializeAs<T>,
@@ -630,6 +870,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, TAs1> SerializeAs<T> for PickFirst<(TAs1,)>
 where
     TAs1: SerializeAs<T>,
@@ -642,6 +883,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, TAs1, TAs2> SerializeAs<T> for PickFirst<(TAs1, TAs2)>
 where
     TAs1: SerializeAs<T>,
@@ -654,6 +896,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, TAs1, TAs2, TAs3> SerializeAs<T> for PickFirst<(TAs1, TAs2, TAs3)>
 where
     TAs1: SerializeAs<T>,
@@ -666,6 +909,7 @@ where
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T, TAs1, TAs2, TAs3, TAs4> SerializeAs<T> for PickFirst<(TAs1, TAs2, TAs3, TAs4)>
 where
     TAs1: SerializeAs<T>,
@@ -709,6 +953,37 @@ where
     }
 }
 
+impl<T, U> SerializeAs<T> for FromIntoRef<U>
+where
+    for<'a> &'a T: Into<U>,
+    U: Serialize,
+{
+    fn serialize_as<S>(source: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        source.into().serialize(serializer)
+    }
+}
+
+impl<T, U> SerializeAs<T> for TryFromIntoRef<U>
+where
+    for<'a> &'a T: TryInto<U>,
+    for<'a> <&'a T as TryInto<U>>::Error: Display,
+    U: Serialize,
+{
+    fn serialize_as<S>(source: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        source
+            .try_into()
+            .map_err(S::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "alloc")]
 impl<'a> SerializeAs<Cow<'a, str>> for BorrowCow {
     fn serialize_as<S>(source: &Cow<'a, str>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -718,8 +993,19 @@ impl<'a> SerializeAs<Cow<'a, str>> for BorrowCow {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'a> SerializeAs<Cow<'a, [u8]>> for BorrowCow {
     fn serialize_as<S>(value: &Cow<'a, [u8]>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_seq(value.iter())
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl<'a, const N: usize> SerializeAs<Cow<'a, [u8; N]>> for BorrowCow {
+    fn serialize_as<S>(value: &Cow<'a, [u8; N]>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

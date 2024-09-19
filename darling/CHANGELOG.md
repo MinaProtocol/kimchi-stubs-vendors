@@ -1,5 +1,125 @@
 # Changelog
 
+## v0.20.10 (July 9, 2024)
+
+-  Add `#[allow(clippy::manual_unwrap_or_default)]` to all generated impls to avoid causing clippy fails in crates using `darling` [#296](https://github.com/TedDriggs/darling/pull/296)
+-  Properly initialize `attrs` magic field in derived `FromAttributes` impls [#297](https://github.com/TedDriggs/darling/pull/297)
+
+## v0.20.9 (May 15, 2024)
+
+-  Allow word-form for newtype enum variants whose only field produces a value when `from_none` is called on their type [#249](https://github.com/TedDriggs/darling/issues/249)
+-  Add `FromMeta` impls for the `std::num::NonZero*` types [#288](https://github.com/TedDriggs/darling/pull/288)
+-  Fix panic in number `FromMeta` impls when the parsed value is too large for the receiver type [#289](https://github.com/TedDriggs/darling/issues/289)
+
+## v0.20.8 (February 23, 2024)
+
+-  Add `#[darling(with = ...)]` support to `attrs` magic field to allow using custom receiver types for `attrs` [#273](https://github.com/TedDriggs/darling/issues/273)
+
+## v0.20.7 (February 22, 2024)
+
+-  Add `#[darling(flatten)]` to allow forwarding unknown fields to another struct [#146](https://github.com/TedDriggs/darling/issues/146)
+-  Don't suggest names of skipped fields in derived impls [#268](https://github.com/TedDriggs/darling/issues/268)
+
+## v0.20.6 (February 14, 2024)
+
+-  Fix some missing syn invisible group handling in `FromMeta` impls [#263](https://github.com/TedDriggs/darling/pull/263)
+-  Fix misleading error message on `Error::unexpected_type` so it no longer implies the type was a literal [#264](https://github.com/TedDriggs/darling/pull/264)
+-  Impl `FromMeta` `Vec` of literals, e.g. `LitStr` [#265](https://github.com/TedDriggs/pull/265)
+
+## v0.20.5 (January 30, 2024)
+
+- Add `Flag::span` inherent method, as `Flag` can no longer impl `syn::spanned::Spanned` [#242](https://github.com/TedDriggs/darling/issues/242)
+
+## v0.20.4 (January 29, 2024)
+
+- Accept bare paths in `#[darling(default = ...)]` [#258](https://github.com/TedDriggs/darling/pull/258)
+- Add `FromMeta` impl for `PathBuf` [#259](https://github.com/TedDriggs/darling/pull/259)
+- Improve `FromMeta` implementation for enums [#260](https://github.com/TedDriggs/darling/pull/260)
+  - Properly implement unit arms in `FromMeta::from_list` to provide a consistent API for heterogeneous enums that include a mix of unit, newtype and struct variants
+  - Add `#[darling(word)]` attribute for unit enum variants (See [#63](https://github.com/TedDriggs/darling/issues/63) for details)
+
+## v0.20.3 (July 12, 2023)
+
+- Add `FromMeta` impl for `u128` and `i128` [#243](https://github.com/TedDriggs/darling/pull/243)
+
+## v0.20.2 (May 25, 2023)
+
+- Allow darling users to omit quotation marks for paths and idents [#236](https://github.com/TedDriggs/darling/pull/236)
+- Add new util functions for controlling how quotation marks are handled when reading into `Expr` fields [#235](https://github.com/TedDriggs/darling/pull/235)
+
+## v0.20.1 (May 2, 2023)
+
+- Add `Clone` impl for `NestedMeta` [#230](https://github.com/TedDriggs/darling/pull/230)
+
+## v0.20.0 (April 27, 2023)
+
+- Bump syn to version 2, courtesy of @jonasbb [#227](https://github.com/TedDriggs/darling/issues/227)
+
+### Breaking Changes
+
+- Replace all occurrences of syn::NestedMeta with darling::ast::NestedMeta.
+
+- Replacement for the deprecated AttributeArgs:
+
+```rust
+// Before
+
+parse_macro_input!(args as AttributeArgs);
+
+// After
+
+match NestedMeta::parse_meta_list(args) {
+    Ok(v) => v,
+    Err(e) => { 
+      return TokenStream::from(Error::from(e).write_errors()); 
+    }
+};
+```
+
+- In GenericParamExt, `LifetimeDef` is now `LifetimeParam`.
+- In GenericParamExt, `as_lifetime_def` is renamed to `as_lifetime_param`.
+- Flag and SpannedValue no longer implement `syn::spanned::Spanned`.
+- The MSRV (minimum supported Rust version) is now 1.56, because of syn.
+
+### Deprecation Warnings
+
+In previous versions of `darling`, arbitrary expressions were passed in attributes by wrapping them in quotation marks.
+v0.20.0 preserves this behavior for `syn::Expr`, but as a result a field expecting a `syn::Expr` cannot accept a string literal - it will incorrectly attempt to parse the contents. If this is an issue for you, please add a comment to [#229](https://github.com/TedDriggs/darling/issues/229).
+
+## v0.14.4 (March 9, 2023)
+
+- Add support for child diagnostics when `diagnostics` feature enabled [#224](https://github.com/TedDriggs/darling/issues/224)
+
+## v0.14.3 (February 3, 2023)
+
+- Re-export `syn` from `darling` to avoid requiring that consuming crates have a `syn` dependency.
+- Change `<SpannedValue<T> as FromMeta>` impl to more precisely capture the _value_ span, as opposed to the span of the entire item.
+- Add `darling::util::{AsShape, Shape, ShapeSet}` to improve "shape" validation for structs and variants. [#222](https://github.com/TedDriggs/issues/222)
+
+## v0.14.2 (October 26, 2022)
+
+- Derived impls of `FromMeta` will now error on literals, rather than silently ignoring them. [#193](https://github.com/TedDriggs/darling/pull/193)
+- Don't include property paths in compile errors when spans are available. [#203](https://github.com/TedDriggs/darling/pull/203)
+
+## v0.14.1 (April 28, 2022)
+
+- Fix a bug where using a trait that accepts `#[darling(attributes(...))]` without specifying any attributes would emit code that did not compile. [#183](https://github.com/TedDriggs/darling/issues/183)
+- Impl `Clone` for `darling::Error` [#184](https://github.com/TedDriggs/darling/pull/184)
+- Impl `From<darling::Error> for syn::Error` [#184](https://github.com/TedDriggs/darling/pull/184)
+- Add `Error::span` and `Error::explicit_span` methods [#184](https://github.com/TedDriggs/darling/pull/184)
+
+## v0.14.0 (April 13, 2022)
+
+- **BREAKING CHANGE:** Remove many trait impls from `util::Flag`. 
+  This type had a number of deref and operator impls that made it usable as sort-of-a-boolean.
+  Real-world usage showed this type is more useful if it's able to carry a span for good errors,
+  and that most of those impls were unnecessary. [#179](https://github.com/TedDriggs/darling/pull/179)
+- Remove need for `#[darling(default)]` on `Option<T>` and `Flag` fields [#161](https://github.com/TedDriggs/darling/issues/161)
+- Improve validation of enum shapes [#178](https://github.com/TedDriggs/darling/pull/178)
+- Bump `proc-macro2` dependency to 1.0.37 [#180](https://github.com/TedDriggs/darling/pull/180)
+- Bump `quote` dependency to 1.0.18 [#180](https://github.com/TedDriggs/darling/pull/180)
+- Bump `syn` dependency to 1.0.91 [#180](https://github.com/TedDriggs/darling/pull/180)
+
 ## v0.13.4 (April 6, 2022)
 
 - Impl `FromMeta` for `syn::Visibility` [#173](https://github.com/TedDriggs/darling/pull/173)

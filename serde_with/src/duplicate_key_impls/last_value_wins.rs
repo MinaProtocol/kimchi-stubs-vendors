@@ -1,8 +1,4 @@
-use alloc::collections::BTreeSet;
-use core::hash::{BuildHasher, Hash};
-#[cfg(feature = "indexmap")]
-use indexmap_crate::IndexSet;
-use std::collections::HashSet;
+use crate::prelude::*;
 
 pub trait DuplicateInsertsLastWinsSet<T> {
     fn new(size_hint: Option<usize>) -> Self;
@@ -11,6 +7,7 @@ pub trait DuplicateInsertsLastWinsSet<T> {
     fn replace(&mut self, value: T);
 }
 
+#[cfg(feature = "std")]
 impl<T, S> DuplicateInsertsLastWinsSet<T> for HashSet<T, S>
 where
     T: Eq + Hash,
@@ -31,8 +28,50 @@ where
     }
 }
 
-#[cfg(feature = "indexmap")]
-impl<T, S> DuplicateInsertsLastWinsSet<T> for IndexSet<T, S>
+#[cfg(feature = "hashbrown_0_14")]
+impl<T, S> DuplicateInsertsLastWinsSet<T> for hashbrown_0_14::HashSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher + Default,
+{
+    #[inline]
+    fn new(size_hint: Option<usize>) -> Self {
+        match size_hint {
+            Some(size) => Self::with_capacity_and_hasher(size, S::default()),
+            None => Self::with_hasher(S::default()),
+        }
+    }
+
+    #[inline]
+    fn replace(&mut self, value: T) {
+        // Hashset already fulfils the contract
+        self.replace(value);
+    }
+}
+
+#[cfg(feature = "indexmap_1")]
+impl<T, S> DuplicateInsertsLastWinsSet<T> for indexmap_1::IndexSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher + Default,
+{
+    #[inline]
+    fn new(size_hint: Option<usize>) -> Self {
+        match size_hint {
+            Some(size) => Self::with_capacity_and_hasher(size, S::default()),
+            None => Self::with_hasher(S::default()),
+        }
+    }
+
+    #[inline]
+    fn replace(&mut self, value: T) {
+        // Hashset already fulfils the contract
+        self.replace(value);
+    }
+}
+
+#[cfg(feature = "indexmap_2")]
+impl<T, S> DuplicateInsertsLastWinsSet<T> for indexmap_2::IndexSet<T, S>
 where
     T: Eq + Hash,
     S: BuildHasher + Default,

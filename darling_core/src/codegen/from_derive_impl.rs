@@ -1,25 +1,26 @@
 use proc_macro2::TokenStream;
-use quote::ToTokens;
+use quote::{quote, ToTokens};
 use syn::Ident;
 
 use crate::{
     ast::Data,
     codegen::{ExtractAttribute, OuterFromImpl, TraitImpl},
-    options::{ForwardAttrs, Shape},
+    options::DeriveInputShapeSet,
     util::PathList,
 };
+
+use super::ForwardAttrs;
 
 pub struct FromDeriveInputImpl<'a> {
     pub ident: Option<&'a Ident>,
     pub generics: Option<&'a Ident>,
     pub vis: Option<&'a Ident>,
-    pub attrs: Option<&'a Ident>,
     pub data: Option<&'a Ident>,
     pub base: TraitImpl<'a>,
     pub attr_names: &'a PathList,
-    pub forward_attrs: Option<&'a ForwardAttrs>,
+    pub forward_attrs: ForwardAttrs<'a>,
     pub from_ident: bool,
-    pub supports: Option<&'a Shape>,
+    pub supports: Option<&'a DeriveInputShapeSet>,
 }
 
 impl<'a> ToTokens for FromDeriveInputImpl<'a> {
@@ -32,7 +33,7 @@ impl<'a> ToTokens for FromDeriveInputImpl<'a> {
             if data.is_newtype() {
                 self.wrap(
                     quote!{
-                        fn from_derive_input(#input: &::syn::DeriveInput) -> ::darling::Result<Self> {
+                        fn from_derive_input(#input: &::darling::export::syn::DeriveInput) -> ::darling::Result<Self> {
                             ::darling::export::Ok(
                                 #ty_ident(::darling::FromDeriveInput::from_derive_input(#input)?)
                             ) #post_transform
@@ -54,7 +55,7 @@ impl<'a> ToTokens for FromDeriveInputImpl<'a> {
             .generics
             .as_ref()
             .map(|i| quote!(#i: ::darling::FromGenerics::from_generics(&#input.generics)?,));
-        let passed_attrs = self.attrs.as_ref().map(|i| quote!(#i: __fwd_attrs,));
+        let passed_attrs = self.forward_attrs.as_initializer();
         let passed_body = self
             .data
             .as_ref()
@@ -63,7 +64,7 @@ impl<'a> ToTokens for FromDeriveInputImpl<'a> {
         let supports = self.supports.map(|i| {
             quote! {
                 #i
-                __validate_body(&#input.data)?;
+                __errors.handle(__validate_body(&#input.data));
             }
         });
 
@@ -82,7 +83,7 @@ impl<'a> ToTokens for FromDeriveInputImpl<'a> {
 
         self.wrap(
             quote! {
-                fn from_derive_input(#input: &::syn::DeriveInput) -> ::darling::Result<Self> {
+                fn from_derive_input(#input: &::darling::export::syn::DeriveInput) -> ::darling::Result<Self> {
                     #declare_errors
 
                     #grab_attrs
@@ -115,8 +116,8 @@ impl<'a> ExtractAttribute for FromDeriveInputImpl<'a> {
         self.attr_names
     }
 
-    fn forwarded_attrs(&self) -> Option<&ForwardAttrs> {
-        self.forward_attrs
+    fn forward_attrs(&self) -> &ForwardAttrs<'_> {
+        &self.forward_attrs
     }
 
     fn param_name(&self) -> TokenStream {
@@ -129,10 +130,6 @@ impl<'a> ExtractAttribute for FromDeriveInputImpl<'a> {
 
     fn local_declarations(&self) -> TokenStream {
         self.base.local_declarations()
-    }
-
-    fn immutable_declarations(&self) -> TokenStream {
-        self.base.immutable_declarations()
     }
 }
 

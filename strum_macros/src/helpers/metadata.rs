@@ -1,12 +1,11 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use syn::{
     parenthesized,
     parse::{Parse, ParseStream},
     parse2, parse_str,
     punctuated::Punctuated,
-    spanned::Spanned,
-    Attribute, DeriveInput, Ident, Lit, LitBool, LitStr, Meta, MetaNameValue, Path, Token, Variant,
-    Visibility,
+    Attribute, DeriveInput, Expr, ExprLit, Field, Ident, Lit, LitBool, LitStr, Meta, MetaNameValue,
+    Path, Token, Variant, Visibility,
 };
 
 use super::case_style::CaseStyle;
@@ -18,6 +17,7 @@ pub mod kw {
     // enum metadata
     custom_keyword!(serialize_all);
     custom_keyword!(use_phf);
+    custom_keyword!(prefix);
 
     // enum discriminant metadata
     custom_keyword!(derive);
@@ -31,6 +31,7 @@ pub mod kw {
     custom_keyword!(to_string);
     custom_keyword!(disabled);
     custom_keyword!(default);
+    custom_keyword!(default_with);
     custom_keyword!(props);
     custom_keyword!(ascii_case_insensitive);
 }
@@ -46,6 +47,10 @@ pub enum EnumMeta {
         crate_module_path: Path,
     },
     UsePhf(kw::use_phf),
+    Prefix {
+        kw: kw::prefix,
+        prefix: LitStr,
+    },
 }
 
 impl Parse for EnumMeta {
@@ -70,19 +75,13 @@ impl Parse for EnumMeta {
             Ok(EnumMeta::AsciiCaseInsensitive(input.parse()?))
         } else if lookahead.peek(kw::use_phf) {
             Ok(EnumMeta::UsePhf(input.parse()?))
+        } else if lookahead.peek(kw::prefix) {
+            let kw = input.parse::<kw::prefix>()?;
+            input.parse::<Token![=]>()?;
+            let prefix = input.parse()?;
+            Ok(EnumMeta::Prefix { kw, prefix })
         } else {
             Err(lookahead.error())
-        }
-    }
-}
-
-impl Spanned for EnumMeta {
-    fn span(&self) -> Span {
-        match self {
-            EnumMeta::SerializeAll { kw, .. } => kw.span(),
-            EnumMeta::AsciiCaseInsensitive(kw) => kw.span(),
-            EnumMeta::Crate { kw, .. } => kw.span(),
-            EnumMeta::UsePhf(use_phf) => use_phf.span(),
         }
     }
 }
@@ -100,7 +99,7 @@ impl Parse for EnumDiscriminantsMeta {
             let kw = input.parse()?;
             let content;
             parenthesized!(content in input);
-            let paths = content.parse_terminated::<_, Token![,]>(Path::parse)?;
+            let paths = content.parse_terminated(Path::parse, Token![,])?;
             Ok(EnumDiscriminantsMeta::Derive {
                 kw,
                 paths: paths.into_iter().collect(),
@@ -123,17 +122,6 @@ impl Parse for EnumDiscriminantsMeta {
             parenthesized!(content in input);
             let nested = content.parse()?;
             Ok(EnumDiscriminantsMeta::Other { path, nested })
-        }
-    }
-}
-
-impl Spanned for EnumDiscriminantsMeta {
-    fn span(&self) -> Span {
-        match self {
-            EnumDiscriminantsMeta::Derive { kw, .. } => kw.span,
-            EnumDiscriminantsMeta::Name { kw, .. } => kw.span,
-            EnumDiscriminantsMeta::Vis { kw, .. } => kw.span,
-            EnumDiscriminantsMeta::Other { path, .. } => path.span(),
         }
     }
 }
@@ -178,6 +166,10 @@ pub enum VariantMeta {
     },
     Disabled(kw::disabled),
     Default(kw::default),
+    DefaultWith {
+        kw: kw::default_with,
+        value: LitStr,
+    },
     AsciiCaseInsensitive {
         kw: kw::ascii_case_insensitive,
         value: bool,
@@ -215,6 +207,11 @@ impl Parse for VariantMeta {
             Ok(VariantMeta::Disabled(input.parse()?))
         } else if lookahead.peek(kw::default) {
             Ok(VariantMeta::Default(input.parse()?))
+        } else if lookahead.peek(kw::default_with) {
+            let kw = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let value = input.parse()?;
+            Ok(VariantMeta::DefaultWith { kw, value })
         } else if lookahead.peek(kw::ascii_case_insensitive) {
             let kw = input.parse()?;
             let value = if input.peek(Token![=]) {
@@ -228,7 +225,7 @@ impl Parse for VariantMeta {
             let kw = input.parse()?;
             let content;
             parenthesized!(content in input);
-            let props = content.parse_terminated::<_, Token![,]>(Prop::parse)?;
+            let props = content.parse_terminated(Prop::parse, Token![,])?;
             Ok(VariantMeta::Props {
                 kw,
                 props: props
@@ -256,22 +253,6 @@ impl Parse for Prop {
     }
 }
 
-impl Spanned for VariantMeta {
-    fn span(&self) -> Span {
-        match self {
-            VariantMeta::Message { kw, .. } => kw.span,
-            VariantMeta::DetailedMessage { kw, .. } => kw.span,
-            VariantMeta::Documentation { value } => value.span(),
-            VariantMeta::Serialize { kw, .. } => kw.span,
-            VariantMeta::ToString { kw, .. } => kw.span,
-            VariantMeta::Disabled(kw) => kw.span,
-            VariantMeta::Default(kw) => kw.span,
-            VariantMeta::AsciiCaseInsensitive { kw, .. } => kw.span,
-            VariantMeta::Props { kw, .. } => kw.span,
-        }
-    }
-}
-
 pub trait VariantExt {
     /// Get all the metadata associated with an enum variant.
     fn get_metadata(&self) -> syn::Result<Vec<VariantMeta>>;
@@ -282,28 +263,68 @@ impl VariantExt for Variant {
         let result = get_metadata_inner("strum", &self.attrs)?;
         self.attrs
             .iter()
-            .filter(|attr| attr.path.is_ident("doc"))
+            .filter(|attr| attr.meta.path().is_ident("doc"))
             .try_fold(result, |mut vec, attr| {
                 if let Meta::NameValue(MetaNameValue {
-                    lit: Lit::Str(value),
+                    value:
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(value),
+                            ..
+                        }),
                     ..
-                }) = attr.parse_meta()?
+                }) = &attr.meta
                 {
-                    vec.push(VariantMeta::Documentation { value })
+                    vec.push(VariantMeta::Documentation {
+                        value: value.clone(),
+                    })
                 }
                 Ok(vec)
             })
     }
 }
 
-fn get_metadata_inner<'a, T: Parse + Spanned>(
+fn get_metadata_inner<'a, T: Parse>(
     ident: &str,
     it: impl IntoIterator<Item = &'a Attribute>,
 ) -> syn::Result<Vec<T>> {
     it.into_iter()
-        .filter(|attr| attr.path.is_ident(ident))
+        .filter(|attr| attr.path().is_ident(ident))
         .try_fold(Vec::new(), |mut vec, attr| {
             vec.extend(attr.parse_args_with(Punctuated::<T, Token![,]>::parse_terminated)?);
             Ok(vec)
         })
+}
+
+#[derive(Debug)]
+pub enum InnerVariantMeta {
+    DefaultWith { kw: kw::default_with, value: LitStr },
+}
+
+impl Parse for InnerVariantMeta {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(kw::default_with) {
+            let kw = input.parse()?;
+            let _: Token![=] = input.parse()?;
+            let value = input.parse()?;
+            Ok(InnerVariantMeta::DefaultWith { kw, value })
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+pub trait InnerVariantExt {
+    /// Get all the metadata associated with an enum variant inner.
+    fn get_named_metadata(&self) -> syn::Result<Vec<InnerVariantMeta>>;
+}
+
+impl InnerVariantExt for Field {
+    fn get_named_metadata(&self) -> syn::Result<Vec<InnerVariantMeta>> {
+        let result = get_metadata_inner("strum", &self.attrs)?;
+        self.attrs
+            .iter()
+            .filter(|attr| attr.meta.path().is_ident("default_with"))
+            .try_fold(result, |vec, _attr| Ok(vec))
+    }
 }

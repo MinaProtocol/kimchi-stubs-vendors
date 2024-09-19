@@ -7,15 +7,18 @@
 //!
 //! [user guide]: crate::guide
 
-mod const_arrays;
+#[cfg(feature = "alloc")]
+mod duplicates;
 mod impls;
+#[cfg(feature = "alloc")]
+mod skip_error;
 
-use super::*;
+use crate::prelude::*;
 
 /// A **data structure** that can be deserialized from any data format supported by Serde, analogue to [`Deserialize`].
 ///
 /// The trait is analogue to the [`serde::Deserialize`][`Deserialize`] trait, with the same meaning of input and output arguments.
-/// It can and should the implemented using the same code structure as the [`Deserialize`] trait.
+/// It can and should be implemented using the same code structure as the [`Deserialize`] trait.
 /// As such, the same advice for [implementing `Deserialize`][impl-deserialize] applies here.
 ///
 /// # Differences to [`Deserialize`]
@@ -57,7 +60,7 @@ use super::*;
 /// ```
 ///
 /// It uses two type parameters, `T` and `U` instead of only one and performs the deserialization step using the `DeserializeAsWrap` type.
-/// The `T` type is the on the Rust side after deserialization, whereas the `U` type determines how the value will be deserialized.
+/// The `T` type is the type on the Rust side after deserialization, whereas the `U` type determines how the value will be deserialized.
 /// These two changes are usually enough to make a container type implement [`DeserializeAs`][].
 ///
 ///
@@ -71,10 +74,10 @@ use super::*;
 /// This shows a simplified implementation for [`DisplayFromStr`].
 ///
 /// ```rust
-/// # #[cfg(all(feature = "macros"))] {
+/// # #[cfg(feature = "macros")] {
 /// # use serde::Deserialize;
 /// # use serde::de::Error;
-/// # use serde_with::DeserializeAs;
+/// # use serde_with::{serde_as, DeserializeAs};
 /// # use std::str::FromStr;
 /// # use std::fmt::Display;
 /// struct DisplayFromStr;
@@ -93,11 +96,11 @@ use super::*;
 ///     }
 /// }
 /// #
-/// # #[serde_with::serde_as]
+/// # #[serde_as]
 /// # #[derive(serde::Deserialize)]
 /// # struct S (#[serde_as(as = "DisplayFromStr")] bool);
 /// #
-/// # assert_eq!(false, serde_json::from_str::<S>(r#""false""#).unwrap().0);
+/// # assert!(!serde_json::from_str::<S>(r#""false""#).unwrap().0);
 /// # }
 /// ```
 /// [`Box`]: std::boxed::Box
@@ -114,7 +117,6 @@ pub trait DeserializeAs<'de, T>: Sized {
 }
 
 /// Helper type to implement [`DeserializeAs`] for container-like types.
-#[derive(Debug)]
 pub struct DeserializeAsWrap<T, U> {
     value: T,
     marker: PhantomData<U>,
@@ -139,5 +141,20 @@ where
             value,
             marker: PhantomData,
         })
+    }
+}
+
+impl<T: ?Sized> As<T> {
+    /// Deserialize type `T` using [`DeserializeAs`][]
+    ///
+    /// The function signature is compatible with [serde's `with` annotation][with-annotation].
+    ///
+    /// [with-annotation]: https://serde.rs/field-attrs.html#with
+    pub fn deserialize<'de, D, I>(deserializer: D) -> Result<I, D::Error>
+    where
+        T: DeserializeAs<'de, I>,
+        D: Deserializer<'de>,
+    {
+        T::deserialize_as(deserializer)
     }
 }
