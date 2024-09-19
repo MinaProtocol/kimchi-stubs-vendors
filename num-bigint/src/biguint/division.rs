@@ -10,7 +10,7 @@ use core::cmp::Ordering::{Equal, Greater, Less};
 use core::mem;
 use core::ops::{Div, DivAssign, Rem, RemAssign};
 use num_integer::Integer;
-use num_traits::{CheckedDiv, One, ToPrimitive, Zero};
+use num_traits::{CheckedDiv, CheckedEuclid, Euclid, One, ToPrimitive, Zero};
 
 /// Divide a two digit numerator by a one digit divisor, returns quotient and remainder:
 ///
@@ -314,7 +314,7 @@ impl Div<BigUint> for BigUint {
     }
 }
 
-impl<'a, 'b> Div<&'b BigUint> for &'a BigUint {
+impl Div<&BigUint> for &BigUint {
     type Output = BigUint;
 
     #[inline]
@@ -323,9 +323,9 @@ impl<'a, 'b> Div<&'b BigUint> for &'a BigUint {
         q
     }
 }
-impl<'a> DivAssign<&'a BigUint> for BigUint {
+impl DivAssign<&BigUint> for BigUint {
     #[inline]
-    fn div_assign(&mut self, other: &'a BigUint) {
+    fn div_assign(&mut self, other: &BigUint) {
         *self = &*self / other;
     }
 }
@@ -475,7 +475,7 @@ impl Rem<BigUint> for BigUint {
     }
 }
 
-impl<'a, 'b> Rem<&'b BigUint> for &'a BigUint {
+impl Rem<&BigUint> for &BigUint {
     type Output = BigUint;
 
     #[inline]
@@ -488,7 +488,7 @@ impl<'a, 'b> Rem<&'b BigUint> for &'a BigUint {
         }
     }
 }
-impl<'a> RemAssign<&'a BigUint> for BigUint {
+impl RemAssign<&BigUint> for BigUint {
     #[inline]
     fn rem_assign(&mut self, other: &BigUint) {
         *self = &*self % other;
@@ -501,7 +501,7 @@ forward_all_scalar_binop_to_ref_val!(impl Rem<u32> for BigUint, rem);
 forward_all_scalar_binop_to_val_val!(impl Rem<u64> for BigUint, rem);
 forward_all_scalar_binop_to_val_val!(impl Rem<u128> for BigUint, rem);
 
-impl<'a> Rem<u32> for &'a BigUint {
+impl Rem<u32> for &BigUint {
     type Output = BigUint;
 
     #[inline]
@@ -516,11 +516,11 @@ impl RemAssign<u32> for BigUint {
     }
 }
 
-impl<'a> Rem<&'a BigUint> for u32 {
+impl Rem<&BigUint> for u32 {
     type Output = BigUint;
 
     #[inline]
-    fn rem(mut self, other: &'a BigUint) -> BigUint {
+    fn rem(mut self, other: &BigUint) -> BigUint {
         self %= other;
         From::from(self)
     }
@@ -529,7 +529,7 @@ impl<'a> Rem<&'a BigUint> for u32 {
 macro_rules! impl_rem_assign_scalar {
     ($scalar:ty, $to_scalar:ident) => {
         forward_val_assign_scalar!(impl RemAssign for BigUint, $scalar, rem_assign);
-        impl<'a> RemAssign<&'a BigUint> for $scalar {
+        impl RemAssign<&BigUint> for $scalar {
             #[inline]
             fn rem_assign(&mut self, other: &BigUint) {
                 *self = match other.$to_scalar() {
@@ -616,5 +616,37 @@ impl CheckedDiv for BigUint {
             return None;
         }
         Some(self.div(v))
+    }
+}
+
+impl CheckedEuclid for BigUint {
+    #[inline]
+    fn checked_div_euclid(&self, v: &BigUint) -> Option<BigUint> {
+        if v.is_zero() {
+            return None;
+        }
+        Some(self.div_euclid(v))
+    }
+
+    #[inline]
+    fn checked_rem_euclid(&self, v: &BigUint) -> Option<BigUint> {
+        if v.is_zero() {
+            return None;
+        }
+        Some(self.rem_euclid(v))
+    }
+}
+
+impl Euclid for BigUint {
+    #[inline]
+    fn div_euclid(&self, v: &BigUint) -> BigUint {
+        // trivially same as regular division
+        self / v
+    }
+
+    #[inline]
+    fn rem_euclid(&self, v: &BigUint) -> BigUint {
+        // trivially same as regular remainder
+        self % v
     }
 }

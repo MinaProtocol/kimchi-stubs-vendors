@@ -283,6 +283,9 @@ impl Integer for BigUint {
     /// Returns `true` if the number is a multiple of `other`.
     #[inline]
     fn is_multiple_of(&self, other: &BigUint) -> bool {
+        if other.is_zero() {
+            return self.is_zero();
+        }
         (self % other).is_zero()
     }
 
@@ -501,13 +504,13 @@ impl Roots for BigUint {
     }
 }
 
-/// A generic trait for converting a value to a `BigUint`.
+/// A generic trait for converting a value to a [`BigUint`].
 pub trait ToBigUint {
-    /// Converts the value of `self` to a `BigUint`.
+    /// Converts the value of `self` to a [`BigUint`].
     fn to_biguint(&self) -> Option<BigUint>;
 }
 
-/// Creates and initializes a `BigUint`.
+/// Creates and initializes a [`BigUint`].
 ///
 /// The digits are in little-endian base matching `BigDigit`.
 #[inline]
@@ -516,7 +519,7 @@ pub(crate) fn biguint_from_vec(digits: Vec<BigDigit>) -> BigUint {
 }
 
 impl BigUint {
-    /// Creates and initializes a `BigUint`.
+    /// Creates and initializes a [`BigUint`].
     ///
     /// The base 2<sup>32</sup> digits are ordered least significant digit first.
     #[inline]
@@ -535,7 +538,7 @@ impl BigUint {
         big
     }
 
-    /// Creates and initializes a `BigUint`.
+    /// Creates and initializes a [`BigUint`].
     ///
     /// The base 2<sup>32</sup> digits are ordered least significant digit first.
     #[inline]
@@ -545,7 +548,7 @@ impl BigUint {
         big
     }
 
-    /// Assign a value to a `BigUint`.
+    /// Assign a value to a [`BigUint`].
     ///
     /// The base 2<sup>32</sup> digits are ordered least significant digit first.
     #[inline]
@@ -561,7 +564,7 @@ impl BigUint {
         self.normalize();
     }
 
-    /// Creates and initializes a `BigUint`.
+    /// Creates and initializes a [`BigUint`].
     ///
     /// The bytes are in big-endian byte order.
     ///
@@ -586,11 +589,11 @@ impl BigUint {
         } else {
             let mut v = bytes.to_vec();
             v.reverse();
-            BigUint::from_bytes_le(&*v)
+            BigUint::from_bytes_le(&v)
         }
     }
 
-    /// Creates and initializes a `BigUint`.
+    /// Creates and initializes a [`BigUint`].
     ///
     /// The bytes are in little-endian byte order.
     #[inline]
@@ -602,7 +605,7 @@ impl BigUint {
         }
     }
 
-    /// Creates and initializes a `BigUint`. The input slice must contain
+    /// Creates and initializes a [`BigUint`]. The input slice must contain
     /// ascii/utf8 characters in [0-9a-zA-Z].
     /// `radix` must be in the range `2...36`.
     ///
@@ -624,7 +627,7 @@ impl BigUint {
         BigUint::from_str_radix(s, radix).ok()
     }
 
-    /// Creates and initializes a `BigUint`. Each u8 of the input slice is
+    /// Creates and initializes a [`BigUint`]. Each `u8` of the input slice is
     /// interpreted as one digit of the number
     /// and must therefore be less than `radix`.
     ///
@@ -644,7 +647,7 @@ impl BigUint {
         convert::from_radix_be(buf, radix)
     }
 
-    /// Creates and initializes a `BigUint`. Each u8 of the input slice is
+    /// Creates and initializes a [`BigUint`]. Each `u8` of the input slice is
     /// interpreted as one digit of the number
     /// and must therefore be less than `radix`.
     ///
@@ -664,7 +667,7 @@ impl BigUint {
         convert::from_radix_le(buf, radix)
     }
 
-    /// Returns the byte representation of the `BigUint` in big-endian byte order.
+    /// Returns the byte representation of the [`BigUint`] in big-endian byte order.
     ///
     /// # Examples
     ///
@@ -681,7 +684,7 @@ impl BigUint {
         v
     }
 
-    /// Returns the byte representation of the `BigUint` in little-endian byte order.
+    /// Returns the byte representation of the [`BigUint`] in little-endian byte order.
     ///
     /// # Examples
     ///
@@ -700,7 +703,7 @@ impl BigUint {
         }
     }
 
-    /// Returns the `u32` digits representation of the `BigUint` ordered least significant digit
+    /// Returns the `u32` digits representation of the [`BigUint`] ordered least significant digit
     /// first.
     ///
     /// # Examples
@@ -718,7 +721,7 @@ impl BigUint {
         self.iter_u32_digits().collect()
     }
 
-    /// Returns the `u64` digits representation of the `BigUint` ordered least significant digit
+    /// Returns the `u64` digits representation of the [`BigUint`] ordered least significant digit
     /// first.
     ///
     /// # Examples
@@ -737,7 +740,7 @@ impl BigUint {
         self.iter_u64_digits().collect()
     }
 
-    /// Returns an iterator of `u32` digits representation of the `BigUint` ordered least
+    /// Returns an iterator of `u32` digits representation of the [`BigUint`] ordered least
     /// significant digit first.
     ///
     /// # Examples
@@ -755,7 +758,7 @@ impl BigUint {
         U32Digits::new(self.data.as_slice())
     }
 
-    /// Returns an iterator of `u64` digits representation of the `BigUint` ordered least
+    /// Returns an iterator of `u64` digits representation of the [`BigUint`] ordered least
     /// significant digit first.
     ///
     /// # Examples
@@ -794,7 +797,7 @@ impl BigUint {
 
     /// Returns the integer in the requested base in big-endian digit order.
     /// The output is not given in a human readable alphabet but as a zero
-    /// based u8 number.
+    /// based `u8` number.
     /// `radix` must be in the range `2...256`.
     ///
     /// # Examples
@@ -832,7 +835,7 @@ impl BigUint {
         convert::to_radix_le(self, radix)
     }
 
-    /// Determines the fewest bits necessary to express the `BigUint`.
+    /// Determines the fewest bits necessary to express the [`BigUint`].
     #[inline]
     pub fn bits(&self) -> u64 {
         if self.is_zero() {
@@ -855,7 +858,7 @@ impl BigUint {
         }
     }
 
-    /// Returns a normalized `BigUint`.
+    /// Returns a normalized [`BigUint`].
     #[inline]
     fn normalized(mut self) -> BigUint {
         self.normalize();
@@ -956,6 +959,30 @@ impl BigUint {
     }
 }
 
+impl num_traits::FromBytes for BigUint {
+    type Bytes = [u8];
+
+    fn from_be_bytes(bytes: &Self::Bytes) -> Self {
+        Self::from_bytes_be(bytes)
+    }
+
+    fn from_le_bytes(bytes: &Self::Bytes) -> Self {
+        Self::from_bytes_le(bytes)
+    }
+}
+
+impl num_traits::ToBytes for BigUint {
+    type Bytes = Vec<u8>;
+
+    fn to_be_bytes(&self) -> Self::Bytes {
+        self.to_bytes_be()
+    }
+
+    fn to_le_bytes(&self) -> Self::Bytes {
+        self.to_bytes_le()
+    }
+}
+
 pub(crate) trait IntDigits {
     fn digits(&self) -> &[BigDigit];
     fn digits_mut(&mut self) -> &mut Vec<BigDigit>;
@@ -987,7 +1014,7 @@ impl IntDigits for BigUint {
     }
 }
 
-/// Convert a u32 chunk (len is either 1 or 2) to a single u64 digit
+/// Convert a `u32` chunk (len is either 1 or 2) to a single `u64` digit
 #[inline]
 fn u32_chunk_to_u64(chunk: &[u32]) -> u64 {
     // raw could have odd length

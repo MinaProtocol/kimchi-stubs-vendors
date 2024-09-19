@@ -185,8 +185,8 @@ impl Name {
 
 #[derive(Copy, Clone)]
 pub struct RenameAllRules {
-    serialize: RenameRule,
-    deserialize: RenameRule,
+    pub serialize: RenameRule,
+    pub deserialize: RenameRule,
 }
 
 impl RenameAllRules {
@@ -216,7 +216,6 @@ pub struct Container {
     type_into: Option<syn::Type>,
     remote: Option<syn::Path>,
     identifier: Identifier,
-    has_flatten: bool,
     serde_path: Option<syn::Path>,
     is_packed: bool,
     /// Error message generated when type can't be deserialized
@@ -587,7 +586,6 @@ impl Container {
             type_into: type_into.get(),
             remote: remote.get(),
             identifier: decide_identifier(cx, item, field_identifier, variant_identifier),
-            has_flatten: false,
             serde_path: serde_path.get(),
             is_packed,
             expecting: expecting.get(),
@@ -653,14 +651,6 @@ impl Container {
 
     pub fn identifier(&self) -> Identifier {
         self.identifier
-    }
-
-    pub fn has_flatten(&self) -> bool {
-        self.has_flatten
-    }
-
-    pub fn mark_has_flatten(&mut self) {
-        self.has_flatten = true;
     }
 
     pub fn custom_serde_path(&self) -> Option<&syn::Path> {
@@ -1794,6 +1784,7 @@ fn borrowable_lifetimes(
 
 fn collect_lifetimes(ty: &syn::Type, out: &mut BTreeSet<syn::Lifetime>) {
     match ty {
+        #![cfg_attr(all(test, exhaustive), deny(non_exhaustive_omitted_patterns))]
         syn::Type::Slice(ty) => {
             collect_lifetimes(&ty.elem, out);
         }
@@ -1829,7 +1820,10 @@ fn collect_lifetimes(ty: &syn::Type, out: &mut BTreeSet<syn::Lifetime>) {
                             syn::GenericArgument::AssocType(binding) => {
                                 collect_lifetimes(&binding.ty, out);
                             }
-                            _ => {}
+                            syn::GenericArgument::Const(_)
+                            | syn::GenericArgument::AssocConst(_)
+                            | syn::GenericArgument::Constraint(_)
+                            | _ => {}
                         }
                     }
                 }
@@ -1851,7 +1845,6 @@ fn collect_lifetimes(ty: &syn::Type, out: &mut BTreeSet<syn::Lifetime>) {
         | syn::Type::Infer(_)
         | syn::Type::Verbatim(_) => {}
 
-        #[cfg_attr(all(test, exhaustive), deny(non_exhaustive_omitted_patterns))]
         _ => {}
     }
 }

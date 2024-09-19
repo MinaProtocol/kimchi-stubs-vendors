@@ -6,11 +6,11 @@ use crate::{IsizePromotion, UsizePromotion};
 
 use core::ops::{Div, DivAssign, Rem, RemAssign};
 use num_integer::Integer;
-use num_traits::{CheckedDiv, ToPrimitive, Zero};
+use num_traits::{CheckedDiv, CheckedEuclid, Euclid, Signed, ToPrimitive, Zero};
 
 forward_all_binop_to_ref_ref!(impl Div for BigInt, div);
 
-impl<'a, 'b> Div<&'b BigInt> for &'a BigInt {
+impl Div<&BigInt> for &BigInt {
     type Output = BigInt;
 
     #[inline]
@@ -20,7 +20,7 @@ impl<'a, 'b> Div<&'b BigInt> for &'a BigInt {
     }
 }
 
-impl<'a> DivAssign<&'a BigInt> for BigInt {
+impl DivAssign<&BigInt> for BigInt {
     #[inline]
     fn div_assign(&mut self, other: &BigInt) {
         *self = &*self / other;
@@ -235,7 +235,7 @@ impl Div<BigInt> for i128 {
 
 forward_all_binop_to_ref_ref!(impl Rem for BigInt, rem);
 
-impl<'a, 'b> Rem<&'b BigInt> for &'a BigInt {
+impl Rem<&BigInt> for &BigInt {
     type Output = BigInt;
 
     #[inline]
@@ -251,7 +251,7 @@ impl<'a, 'b> Rem<&'b BigInt> for &'a BigInt {
     }
 }
 
-impl<'a> RemAssign<&'a BigInt> for BigInt {
+impl RemAssign<&BigInt> for BigInt {
     #[inline]
     fn rem_assign(&mut self, other: &BigInt) {
         *self = &*self % other;
@@ -444,5 +444,53 @@ impl CheckedDiv for BigInt {
             return None;
         }
         Some(self.div(v))
+    }
+}
+
+impl CheckedEuclid for BigInt {
+    #[inline]
+    fn checked_div_euclid(&self, v: &BigInt) -> Option<BigInt> {
+        if v.is_zero() {
+            return None;
+        }
+        Some(self.div_euclid(v))
+    }
+
+    #[inline]
+    fn checked_rem_euclid(&self, v: &BigInt) -> Option<BigInt> {
+        if v.is_zero() {
+            return None;
+        }
+        Some(self.rem_euclid(v))
+    }
+}
+
+impl Euclid for BigInt {
+    #[inline]
+    fn div_euclid(&self, v: &BigInt) -> BigInt {
+        let (q, r) = self.div_rem(v);
+        if r.is_negative() {
+            if v.is_positive() {
+                q - 1
+            } else {
+                q + 1
+            }
+        } else {
+            q
+        }
+    }
+
+    #[inline]
+    fn rem_euclid(&self, v: &BigInt) -> BigInt {
+        let r = self % v;
+        if r.is_negative() {
+            if v.is_positive() {
+                r + v
+            } else {
+                r - v
+            }
+        } else {
+            r
+        }
     }
 }

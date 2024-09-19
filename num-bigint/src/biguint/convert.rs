@@ -1,3 +1,6 @@
+// This uses stdlib features higher than the MSRV
+#![allow(clippy::manual_range_contains)] // 1.35
+
 use super::{biguint_from_vec, BigUint, ToBigUint};
 
 use super::addition::add2;
@@ -17,7 +20,7 @@ use core::mem;
 use core::str::FromStr;
 use num_integer::{Integer, Roots};
 use num_traits::float::FloatCore;
-use num_traits::{FromPrimitive, Num, PrimInt, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, Num, One, PrimInt, ToPrimitive, Zero};
 
 /// Find last set bit
 /// fls(0) == 0, fls(u32::MAX) == 32
@@ -102,14 +105,20 @@ fn from_radix_digits_be(v: &[u8], radix: u32) -> BigUint {
     debug_assert!(!v.is_empty() && !radix.is_power_of_two());
     debug_assert!(v.iter().all(|&c| u32::from(c) < radix));
 
-    #[cfg(feature = "std")]
-    let radix_log2 = f64::from(radix).log2();
-    #[cfg(not(feature = "std"))]
-    let radix_log2 = ilog2(radix.next_power_of_two()) as f64;
-
     // Estimate how big the result will be, so we can pre-allocate it.
-    let bits = radix_log2 * v.len() as f64;
-    let big_digits = (bits / big_digit::BITS as f64).ceil();
+    #[cfg(feature = "std")]
+    let big_digits = {
+        let radix_log2 = f64::from(radix).log2();
+        let bits = radix_log2 * v.len() as f64;
+        (bits / big_digit::BITS as f64).ceil()
+    };
+    #[cfg(not(feature = "std"))]
+    let big_digits = {
+        let radix_log2 = ilog2(radix.next_power_of_two()) as usize;
+        let bits = radix_log2 * v.len();
+        (bits / big_digit::BITS as usize) + 1
+    };
+
     let mut data = Vec::with_capacity(big_digits.to_usize().unwrap_or(0));
 
     let (base, power) = get_radix_base(radix, big_digit::BITS);
@@ -281,19 +290,31 @@ fn high_bits_to_u64(v: &BigUint) -> u64 {
                 let digit_bits = (bits - 1) % u64::from(big_digit::BITS) + 1;
                 let bits_want = Ord::min(64 - ret_bits, digit_bits);
 
-                if bits_want != 64 {
-                    ret <<= bits_want;
+                if bits_want != 0 {
+                    if bits_want != 64 {
+                        ret <<= bits_want;
+                    }
+                    // XXX Conversion is useless if already 64-bit.
+                    #[allow(clippy::useless_conversion)]
+                    let d0 = u64::from(*d) >> (digit_bits - bits_want);
+                    ret |= d0;
                 }
-                // XXX Conversion is useless if already 64-bit.
-                #[allow(clippy::useless_conversion)]
-                let d0 = u64::from(*d) >> (digit_bits - bits_want);
-                ret |= d0;
+
+                // Implement round-to-odd: If any lower bits are 1, set LSB to 1
+                // so that rounding again to floating point value using
+                // nearest-ties-to-even is correct.
+                //
+                // See: https://en.wikipedia.org/wiki/Rounding#Rounding_to_prepare_for_shorter_precision
+
+                if digit_bits - bits_want != 0 {
+                    // XXX Conversion is useless if already 64-bit.
+                    #[allow(clippy::useless_conversion)]
+                    let masked = u64::from(*d) << (64 - (digit_bits - bits_want) as u32);
+                    ret |= (masked != 0) as u64;
+                }
+
                 ret_bits += bits_want;
                 bits -= bits_want;
-
-                if ret_bits == 64 {
-                    break;
-                }
             }
 
             ret
@@ -572,6 +593,16 @@ impl_to_biguint!(u128, FromPrimitive::from_u128);
 impl_to_biguint!(f32, FromPrimitive::from_f32);
 impl_to_biguint!(f64, FromPrimitive::from_f64);
 
+impl From<bool> for BigUint {
+    fn from(x: bool) -> Self {
+        if x {
+            One::one()
+        } else {
+            Zero::zero()
+        }
+    }
+}
+
 // Extract bitwise digits that evenly divide BigDigit
 pub(super) fn to_bitwise_digits_le(u: &BigUint, bits: u8) -> Vec<u8> {
     debug_assert!(!u.is_zero() && bits <= 8 && big_digit::BITS % bits == 0);
@@ -647,12 +678,17 @@ pub(super) fn to_radix_digits_le(u: &BigUint, radix: u32) -> Vec<u8> {
     debug_assert!(!u.is_zero() && !radix.is_power_of_two());
 
     #[cfg(feature = "std")]
-    let radix_log2 = f64::from(radix).log2();
+    let radix_digits = {
+        let radix_log2 = f64::from(radix).log2();
+        ((u.bits() as f64) / radix_log2).ceil()
+    };
     #[cfg(not(feature = "std"))]
-    let radix_log2 = ilog2(radix) as f64;
+    let radix_digits = {
+        let radix_log2 = ilog2(radix) as usize;
+        ((u.bits() as usize) / radix_log2) + 1
+    };
 
     // Estimate how big the result will be, so we can pre-allocate it.
-    let radix_digits = ((u.bits() as f64) / radix_log2).ceil();
     let mut res = Vec::with_capacity(radix_digits.to_usize().unwrap_or(0));
 
     let mut digits = u.clone();

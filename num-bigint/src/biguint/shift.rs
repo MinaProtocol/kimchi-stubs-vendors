@@ -35,7 +35,7 @@ fn biguint_shl2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
 
     if shift > 0 {
         let mut carry = 0;
-        let carry_shift = big_digit::BITS as u8 - shift;
+        let carry_shift = big_digit::BITS - shift;
         for elem in data[digits..].iter_mut() {
             let new_carry = *elem >> carry_shift;
             *elem = (*elem << shift) | carry;
@@ -79,7 +79,7 @@ fn biguint_shr2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
 
     if shift > 0 {
         let mut borrow = 0;
-        let borrow_shift = big_digit::BITS as u8 - shift;
+        let borrow_shift = big_digit::BITS - shift;
         for elem in data.iter_mut().rev() {
             let new_borrow = *elem << borrow_shift;
             *elem = (*elem >> shift) | borrow;
@@ -92,25 +92,25 @@ fn biguint_shr2(n: Cow<'_, BigUint>, digits: usize, shift: u8) -> BigUint {
 
 macro_rules! impl_shift {
     (@ref $Shx:ident :: $shx:ident, $ShxAssign:ident :: $shx_assign:ident, $rhs:ty) => {
-        impl<'b> $Shx<&'b $rhs> for BigUint {
+        impl $Shx<&$rhs> for BigUint {
             type Output = BigUint;
 
             #[inline]
-            fn $shx(self, rhs: &'b $rhs) -> BigUint {
+            fn $shx(self, rhs: &$rhs) -> BigUint {
                 $Shx::$shx(self, *rhs)
             }
         }
-        impl<'a, 'b> $Shx<&'b $rhs> for &'a BigUint {
+        impl $Shx<&$rhs> for &BigUint {
             type Output = BigUint;
 
             #[inline]
-            fn $shx(self, rhs: &'b $rhs) -> BigUint {
+            fn $shx(self, rhs: &$rhs) -> BigUint {
                 $Shx::$shx(self, *rhs)
             }
         }
-        impl<'b> $ShxAssign<&'b $rhs> for BigUint {
+        impl $ShxAssign<&$rhs> for BigUint {
             #[inline]
-            fn $shx_assign(&mut self, rhs: &'b $rhs) {
+            fn $shx_assign(&mut self, rhs: &$rhs) {
                 $ShxAssign::$shx_assign(self, *rhs);
             }
         }
@@ -124,7 +124,7 @@ macro_rules! impl_shift {
                 biguint_shl(Cow::Owned(self), rhs)
             }
         }
-        impl<'a> Shl<$rhs> for &'a BigUint {
+        impl Shl<$rhs> for &BigUint {
             type Output = BigUint;
 
             #[inline]
@@ -149,7 +149,7 @@ macro_rules! impl_shift {
                 biguint_shr(Cow::Owned(self), rhs)
             }
         }
-        impl<'a> Shr<$rhs> for &'a BigUint {
+        impl Shr<$rhs> for &BigUint {
             type Output = BigUint;
 
             #[inline]
