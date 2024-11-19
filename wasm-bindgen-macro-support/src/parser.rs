@@ -8,7 +8,6 @@ use backend::util::{ident_ty, ShortHash};
 use backend::Diagnostic;
 use proc_macro2::{Ident, Span, TokenStream, TokenTree};
 use quote::ToTokens;
-use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream, Result as SynResult};
 use syn::spanned::Spanned;
 use syn::{ItemFn, Lit, MacroDelimiter, ReturnType};
@@ -65,8 +64,8 @@ macro_rules! attrgen {
             (module, Module(Span, String, Span)),
             (raw_module, RawModule(Span, String, Span)),
             (inline_js, InlineJs(Span, String, Span)),
-            (getter, Getter(Span, Option<String>)),
-            (setter, Setter(Span, Option<String>)),
+            (getter, Getter(Span, Option<Ident>)),
+            (setter, Setter(Span, Option<Ident>)),
             (indexing_getter, IndexingGetter(Span)),
             (indexing_setter, IndexingSetter(Span)),
             (indexing_deleter, IndexingDeleter(Span)),
@@ -87,13 +86,10 @@ macro_rules! attrgen {
             (main, Main(Span)),
             (start, Start(Span)),
             (wasm_bindgen, WasmBindgen(Span, syn::Path)),
-            (js_sys, JsSys(Span, syn::Path)),
             (wasm_bindgen_futures, WasmBindgenFutures(Span, syn::Path)),
             (skip, Skip(Span)),
             (typescript_type, TypeScriptType(Span, String, Span)),
             (getter_with_clone, GetterWithClone(Span)),
-            (static_string, StaticString(Span)),
-            (thread_local, ThreadLocal(Span)),
 
             // For testing purposes only.
             (assert_no_shim, AssertNoShim(Span)),
@@ -147,13 +143,14 @@ macro_rules! methods {
         fn $name(&self) -> Option<(&str, Span)> {
             self.attrs
                 .iter()
-                .find_map(|a| match &a.1 {
+                .filter_map(|a| match &a.1 {
                     BindgenAttr::$variant(_, s, span) => {
                         a.0.set(true);
                         Some((&s[..], *span))
                     }
                     _ => None,
                 })
+                .next()
         }
     };
 
@@ -161,13 +158,14 @@ macro_rules! methods {
         fn $name(&self) -> Option<(&[String], &[Span])> {
             self.attrs
                 .iter()
-                .find_map(|a| match &a.1 {
+                .filter_map(|a| match &a.1 {
                     BindgenAttr::$variant(_, ss, spans) => {
                         a.0.set(true);
                         Some((&ss[..], &spans[..]))
                     }
                     _ => None,
                 })
+                .next()
         }
     };
 
@@ -176,13 +174,14 @@ macro_rules! methods {
         fn $name(&self) -> Option<&$($other)*> {
             self.attrs
                 .iter()
-                .find_map(|a| match &a.1 {
+                .filter_map(|a| match &a.1 {
                     BindgenAttr::$variant(_, s) => {
                         a.0.set(true);
                         Some(s)
                     }
                     _ => None,
                 })
+                .next()
         }
     };
 
@@ -191,13 +190,14 @@ macro_rules! methods {
         fn $name(&self) -> Option<&$($other)*> {
             self.attrs
                 .iter()
-                .find_map(|a| match &a.1 {
+                .filter_map(|a| match &a.1 {
                     BindgenAttr::$variant(s) => {
                         a.0.set(true);
                         Some(s)
                     }
                     _ => None,
                 })
+                .next()
         }
     };
 }
@@ -302,15 +302,10 @@ impl Parse for BindgenAttr {
                 return Ok(BindgenAttr::$variant(attr_span, ident))
             });
 
-            (@parser $variant:ident(Span, Option<String>)) => ({
+            (@parser $variant:ident(Span, Option<Ident>)) => ({
                 if input.parse::<Token![=]>().is_ok() {
-                    if input.peek(syn::LitStr) {
-                        let litstr = input.parse::<syn::LitStr>()?;
-                        return Ok(BindgenAttr::$variant(attr_span, Some(litstr.value())))
-                    }
-
                     let ident = input.parse::<AnyIdent>()?.0;
-                    return Ok(BindgenAttr::$variant(attr_span, Some(ident.to_string())))
+                    return Ok(BindgenAttr::$variant(attr_span, Some(ident)))
                 } else {
                     return Ok(BindgenAttr::$variant(attr_span, None));
                 }
@@ -420,7 +415,7 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs)> for &'a mut syn::ItemStruct
         let js_name = attrs
             .js_name()
             .map(|s| s.0.to_string())
-            .unwrap_or(self.ident.unraw().to_string());
+            .unwrap_or(self.ident.to_string());
         let is_inspectable = attrs.inspectable().is_some();
         let getter_with_clone = attrs.getter_with_clone();
         for (i, field) in self.fields.iter_mut().enumerate() {
@@ -429,7 +424,7 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs)> for &'a mut syn::ItemStruct
                 _ => continue,
             }
             let (js_field_name, member) = match &field.ident {
-                Some(ident) => (ident.unraw().to_string(), syn::Member::Named(ident.clone())),
+                Some(ident) => (ident.to_string(), syn::Member::Named(ident.clone())),
                 None => (i.to_string(), syn::Member::Unnamed(i.into())),
             };
 
@@ -513,7 +508,6 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule
             false,
             None,
             false,
-            Some(&["default"]),
         )?
         .0;
         let catch = opts.catch().is_some();
@@ -534,7 +528,7 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule
         let operation_kind = operation_kind(&opts);
 
         let kind = if opts.method().is_some() {
-            let class = wasm.arguments.first().ok_or_else(|| {
+            let class = wasm.arguments.get(0).ok_or_else(|| {
                 err_span!(self, "imported methods must have at least one argument")
             })?;
             let class = match get_ty(&class.ty) {
@@ -754,13 +748,6 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule
             bail_span!(self.mutability, "cannot import mutable globals yet")
         }
 
-        if let Some(span) = opts.static_string() {
-            return Err(Diagnostic::span_error(
-                *span,
-                "static strings require a string literal",
-            ));
-        }
-
         let default_name = self.ident.to_string();
         let js_name = opts
             .js_name()
@@ -772,8 +759,6 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule
             self.ident,
             ShortHash((&js_name, module, &self.ident)),
         );
-        let thread_local = opts.thread_local().is_some();
-
         opts.check_used();
         Ok(ast::ImportKind::Static(ast::ImportStatic {
             ty: *self.ty,
@@ -782,65 +767,6 @@ impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule
             js_name,
             shim: Ident::new(&shim, Span::call_site()),
             wasm_bindgen: program.wasm_bindgen.clone(),
-            thread_local,
-        }))
-    }
-}
-
-impl<'a> ConvertToAst<(&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule>)>
-    for syn::ItemStatic
-{
-    type Target = ast::ImportKind;
-
-    fn convert(
-        self,
-        (program, opts, module): (&ast::Program, BindgenAttrs, &'a Option<ast::ImportModule>),
-    ) -> Result<Self::Target, Diagnostic> {
-        if let syn::StaticMutability::Mut(_) = self.mutability {
-            bail_span!(self.mutability, "cannot import mutable globals yet")
-        }
-
-        let string = if let syn::Expr::Lit(syn::ExprLit {
-            lit: syn::Lit::Str(string),
-            ..
-        }) = *self.expr.clone()
-        {
-            string.value()
-        } else {
-            bail_span!(
-                self.expr,
-                "statics with a value can only be string literals"
-            )
-        };
-
-        if opts.static_string().is_none() {
-            bail_span!(
-                self,
-                "static strings require `#[wasm_bindgen(static_string)]`"
-            )
-        }
-
-        if opts.thread_local().is_none() {
-            bail_span!(
-                self,
-                "static strings require `#[wasm_bindgen(thread_local)]`"
-            )
-        }
-
-        let shim = format!(
-            "__wbg_string_{}_{}",
-            self.ident,
-            ShortHash((&module, &self.ident)),
-        );
-        opts.check_used();
-        Ok(ast::ImportKind::String(ast::ImportString {
-            ty: *self.ty,
-            vis: self.vis,
-            rust_name: self.ident.clone(),
-            shim: Ident::new(&shim, Span::call_site()),
-            wasm_bindgen: program.wasm_bindgen.clone(),
-            js_sys: program.js_sys.clone(),
-            string,
         }))
     }
 }
@@ -870,18 +796,14 @@ impl ConvertToAst<BindgenAttrs> for syn::ItemFn {
             false,
             None,
             false,
-            Some(&["default"]),
         )?;
         attrs.check_used();
         Ok(ret.0)
     }
 }
 
-pub(crate) fn is_js_keyword(keyword: &str, skip: Option<&[&str]>) -> bool {
-    JS_KEYWORDS
-        .iter()
-        .filter(|keyword| skip.filter(|skip| skip.contains(keyword)).is_none())
-        .any(|this| *this == keyword)
+pub(crate) fn is_js_keyword(keyword: &str) -> bool {
+    JS_KEYWORDS.contains(&keyword)
 }
 
 /// Construct a function (and gets the self type if appropriate) for our AST from a syn function.
@@ -895,7 +817,6 @@ fn function_from_decl(
     allow_self: bool,
     self_ty: Option<&Ident>,
     is_from_impl: bool,
-    skip_keywords: Option<&[&str]>,
 ) -> Result<(ast::Function, Option<ast::MethodSelf>), Diagnostic> {
     if sig.variadic.is_some() {
         bail_span!(sig.variadic, "can't #[wasm_bindgen] variadic functions");
@@ -934,7 +855,7 @@ fn function_from_decl(
     let replace_colliding_arg = |i: &mut syn::PatType| {
         if let syn::Pat::Ident(ref mut i) = *i.pat {
             let ident = i.ident.to_string();
-            if is_js_keyword(ident.as_str(), skip_keywords) {
+            if is_js_keyword(ident.as_str()) {
                 i.ident = Ident::new(format!("_{}", ident).as_str(), i.ident.span());
             }
         }
@@ -971,33 +892,29 @@ fn function_from_decl(
         syn::ReturnType::Type(_, ty) => Some(replace_self(*ty)),
     };
 
-    let (name, name_span, renamed_via_js_name) =
-        if let Some((js_name, js_name_span)) = opts.js_name() {
-            let kind = operation_kind(opts);
-            let prefix = match kind {
-                OperationKind::Setter(_) => "set_",
-                _ => "",
-            };
-            let name = if prefix.is_empty()
-                && opts.method().is_none()
-                && is_js_keyword(js_name, skip_keywords)
-            {
-                format!("_{}", js_name)
-            } else {
-                format!("{}{}", prefix, js_name)
-            };
-            (name, js_name_span, true)
-        } else {
-            let name = if !is_from_impl
-                && opts.method().is_none()
-                && is_js_keyword(&decl_name.to_string(), skip_keywords)
-            {
-                format!("_{}", decl_name.unraw())
-            } else {
-                decl_name.unraw().to_string()
-            };
-            (name, decl_name.span(), false)
+    let (name, name_span, renamed_via_js_name) = if let Some((js_name, js_name_span)) =
+        opts.js_name()
+    {
+        let kind = operation_kind(opts);
+        let prefix = match kind {
+            OperationKind::Setter(_) => "set_",
+            _ => "",
         };
+        let name = if prefix.is_empty() && opts.method().is_none() && is_js_keyword(js_name) {
+            format!("_{}", js_name)
+        } else {
+            format!("{}{}", prefix, js_name)
+        };
+        (name, js_name_span, true)
+    } else {
+        let name =
+            if !is_from_impl && opts.method().is_none() && is_js_keyword(&decl_name.to_string()) {
+                format!("_{}", decl_name)
+            } else {
+                decl_name.to_string()
+            };
+        (name, decl_name.span(), false)
+    };
     Ok((
         ast::Function {
             arguments,
@@ -1036,9 +953,6 @@ impl<'a> MacroParse<(Option<BindgenAttrs>, &'a mut TokenStream)> for syn::Item {
                 let opts = opts.unwrap_or_default();
                 if let Some(path) = opts.wasm_bindgen() {
                     program.wasm_bindgen = path.clone();
-                }
-                if let Some(path) = opts.js_sys() {
-                    program.js_sys = path.clone();
                 }
                 if let Some(path) = opts.wasm_bindgen_futures() {
                     program.wasm_bindgen_futures = path.clone();
@@ -1277,7 +1191,6 @@ impl<'a> MacroParse<&ClassMarker> for &'a mut syn::ImplItemFn {
             true,
             Some(class),
             true,
-            None,
         )?;
         let method_kind = if opts.constructor().is_some() {
             ast::MethodKind::Constructor
@@ -1303,7 +1216,7 @@ impl<'a> MacroParse<&ClassMarker> for &'a mut syn::ImplItemFn {
     }
 }
 
-fn string_enum(enum_: syn::ItemEnum, program: &mut ast::Program) -> Result<(), Diagnostic> {
+fn import_enum(enum_: syn::ItemEnum, program: &mut ast::Program) -> Result<(), Diagnostic> {
     let mut variants = vec![];
     let mut variant_values = vec![];
 
@@ -1337,7 +1250,7 @@ fn string_enum(enum_: syn::ItemEnum, program: &mut ast::Program) -> Result<(), D
     program.imports.push(ast::Import {
         module: None,
         js_namespace: None,
-        kind: ast::ImportKind::Enum(ast::StringEnum {
+        kind: ast::ImportKind::Enum(ast::ImportEnum {
             vis: enum_.vis,
             name: enum_.ident,
             variants,
@@ -1369,7 +1282,7 @@ impl<'a> MacroParse<(&'a mut TokenStream, BindgenAttrs)> for syn::ItemEnum {
             }) = get_expr(expr)
             {
                 opts.check_used();
-                return string_enum(self, program);
+                return import_enum(self, program);
             }
         }
         let js_name = opts
@@ -1442,13 +1355,14 @@ impl<'a> MacroParse<(&'a mut TokenStream, BindgenAttrs)> for syn::ItemEnum {
         values.sort();
         let hole = values
             .windows(2)
-            .find_map(|window| {
+            .filter_map(|window| {
                 if window[0] + 1 != window[1] {
                     Some(window[0] + 1)
                 } else {
                     None
                 }
             })
+            .next()
             .unwrap_or(*values.last().unwrap() + 1);
         for value in values {
             assert!(hole != value);
@@ -1478,17 +1392,17 @@ impl MacroParse<BindgenAttrs> for syn::ItemConst {
             bail_span!(self, "#[wasm_bindgen] will not work on constants unless you are defining a #[wasm_bindgen(typescript_custom_section)].");
         }
 
-        let typescript_custom_section = match get_expr(&self.expr) {
+        match get_expr(&self.expr) {
             syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(litstr),
                 ..
-            }) => ast::LitOrExpr::Lit(litstr.value()),
-            expr => ast::LitOrExpr::Expr(expr.clone()),
-        };
-
-        program
-            .typescript_custom_sections
-            .push(typescript_custom_section);
+            }) => {
+                program.typescript_custom_sections.push(litstr.value());
+            }
+            expr => {
+                bail_span!(expr, "Expected a string literal to be used with #[wasm_bindgen(typescript_custom_section)].");
+            }
+        }
 
         opts.check_used();
 
@@ -1540,20 +1454,6 @@ impl MacroParse<ForeignItemCtx> for syn::ForeignItem {
                 syn::ForeignItem::Fn(ref mut f) => &mut f.attrs,
                 syn::ForeignItem::Type(ref mut t) => &mut t.attrs,
                 syn::ForeignItem::Static(ref mut s) => &mut s.attrs,
-                syn::ForeignItem::Verbatim(v) => {
-                    let mut item: syn::ItemStatic =
-                        syn::parse(v.into()).expect("only foreign functions/types allowed for now");
-                    let item_opts = BindgenAttrs::find(&mut item.attrs)?;
-                    let kind = item.convert((program, item_opts, &ctx.module))?;
-
-                    program.imports.push(ast::Import {
-                        module: None,
-                        js_namespace: None,
-                        kind,
-                    });
-
-                    return Ok(());
-                }
                 _ => panic!("only foreign functions/types allowed for now"),
             };
             BindgenAttrs::find(attrs)?
@@ -1588,10 +1488,6 @@ pub fn module_from_opts(
 ) -> Result<Option<ast::ImportModule>, Diagnostic> {
     if let Some(path) = opts.wasm_bindgen() {
         program.wasm_bindgen = path.clone();
-    }
-
-    if let Some(path) = opts.js_sys() {
-        program.js_sys = path.clone();
     }
 
     if let Some(path) = opts.wasm_bindgen_futures() {
