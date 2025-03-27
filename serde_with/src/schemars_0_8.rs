@@ -112,6 +112,9 @@ pub trait JsonSchemaAs<T: ?Sized> {
     /// The name of the generated JSON Schema.
     ///
     /// This is used as the title for root schemas, and the key within the root's `definitions` property for sub-schemas.
+    ///
+    /// As the schema name is used as as part of `$ref` it has to be a valid URI path segment according to
+    /// [RFC 3986 Section-3](https://datatracker.ietf.org/doc/html/rfc3986#section-3).
     fn schema_name() -> String;
 
     /// Returns a string that uniquely identifies the schema produced by this type.
@@ -536,11 +539,11 @@ where
     T: JsonSchema,
 {
     fn schema_name() -> String {
-        std::format!("EnumMap<{}>", T::schema_name())
+        std::format!("EnumMap({})", T::schema_name())
     }
 
     fn schema_id() -> Cow<'static, str> {
-        std::format!("serde_with::EnumMap<{}>", T::schema_id()).into()
+        std::format!("serde_with::EnumMap({})", T::schema_id()).into()
     }
 
     // We generate the schema here by going through all the variants of the
@@ -727,12 +730,12 @@ where
     TA: JsonSchemaAs<T>,
 {
     fn schema_name() -> String {
-        std::format!("KeyValueMap<{}>", <WrapSchema<T, TA>>::schema_name())
+        std::format!("KeyValueMap({})", <WrapSchema<T, TA>>::schema_name())
     }
 
     fn schema_id() -> Cow<'static, str> {
         std::format!(
-            "serde_with::KeyValueMap<{}>",
+            "serde_with::KeyValueMap({})",
             <WrapSchema<T, TA>>::schema_id()
         )
         .into()
@@ -787,6 +790,8 @@ map_first_last_wins_schema!(BTreeMap<K, V>);
 map_first_last_wins_schema!(=> S HashMap<K, V, S>);
 #[cfg(feature = "hashbrown_0_14")]
 map_first_last_wins_schema!(=> S hashbrown_0_14::HashMap<K, V, S>);
+#[cfg(feature = "hashbrown_0_15")]
+map_first_last_wins_schema!(=> S hashbrown_0_15::HashMap<K, V, S>);
 #[cfg(feature = "indexmap_1")]
 map_first_last_wins_schema!(=> S indexmap_1::IndexMap<K, V, S>);
 #[cfg(feature = "indexmap_2")]
@@ -798,14 +803,14 @@ where
 {
     fn schema_name() -> String {
         std::format!(
-            "OneOrMany<{}, PreferOne>",
+            "OneOrMany({},PreferOne)",
             <WrapSchema<T, TA>>::schema_name()
         )
     }
 
     fn schema_id() -> Cow<'static, str> {
         std::format!(
-            "serde_with::OneOrMany<{}, PreferOne>",
+            "serde_with::OneOrMany({},PreferOne)",
             <WrapSchema<T, TA>>::schema_id()
         )
         .into()
@@ -894,9 +899,9 @@ macro_rules! schema_for_pickfirst {
             fn schema_name() -> String {
                 std::format!(
                     concat!(
-                        "PickFirst<(",
+                        "PickFirst(",
                         $( "{", stringify!($param), "}", )+
-                        ")>"
+                        ")"
                     ),
                     $( $param = <WrapSchema<T, $param>>::schema_name(), )+
                 )
@@ -905,9 +910,9 @@ macro_rules! schema_for_pickfirst {
             fn schema_id() -> Cow<'static, str> {
                 std::format!(
                     concat!(
-                        "serde_with::PickFirst<(",
+                        "serde_with::PickFirst(",
                         $( "{", stringify!($param), "}", )+
-                        ")>"
+                        ")"
                     ),
                     $( $param = <WrapSchema<T, $param>>::schema_id(), )+
                 )

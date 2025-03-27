@@ -14,6 +14,7 @@
 //! In the future this can hopefully be replaced by a public type in `serde` itself.
 //! <https://github.com/serde-rs/serde/pull/2348>
 
+use self::utils::{get_unexpected_i128, get_unexpected_u128};
 use crate::{
     prelude::*,
     utils::{size_hint_cautious, size_hint_from_bounds},
@@ -57,22 +58,22 @@ pub(crate) enum Content<'de> {
     Map(Vec<(Content<'de>, Content<'de>)>),
 }
 
-impl<'de> Content<'de> {
+impl Content<'_> {
     #[cold]
-    fn unexpected(&self) -> Unexpected<'_> {
+    fn unexpected<'a>(&'a self, buf: &'a mut [u8; 58]) -> Unexpected<'a> {
         match *self {
             Content::Bool(b) => Unexpected::Bool(b),
-            Content::U8(n) => Unexpected::Unsigned(n as u64),
-            Content::U16(n) => Unexpected::Unsigned(n as u64),
-            Content::U32(n) => Unexpected::Unsigned(n as u64),
+            Content::U8(n) => Unexpected::Unsigned(u64::from(n)),
+            Content::U16(n) => Unexpected::Unsigned(u64::from(n)),
+            Content::U32(n) => Unexpected::Unsigned(u64::from(n)),
             Content::U64(n) => Unexpected::Unsigned(n),
-            Content::U128(_) => Unexpected::Other("u128"),
-            Content::I8(n) => Unexpected::Signed(n as i64),
-            Content::I16(n) => Unexpected::Signed(n as i64),
-            Content::I32(n) => Unexpected::Signed(n as i64),
+            Content::U128(n) => get_unexpected_u128(n, buf),
+            Content::I8(n) => Unexpected::Signed(i64::from(n)),
+            Content::I16(n) => Unexpected::Signed(i64::from(n)),
+            Content::I32(n) => Unexpected::Signed(i64::from(n)),
             Content::I64(n) => Unexpected::Signed(n),
-            Content::I128(_) => Unexpected::Other("i128"),
-            Content::F32(f) => Unexpected::Float(f as f64),
+            Content::I128(n) => get_unexpected_i128(n, buf),
+            Content::F32(f) => Unexpected::Float(f64::from(f)),
             Content::F64(f) => Unexpected::Float(f),
             Content::Char(c) => Unexpected::Char(c),
             Content::String(ref s) => Unexpected::Str(s),
@@ -325,7 +326,8 @@ where
 {
     #[cold]
     fn invalid_type(self, exp: &dyn Expected) -> E {
-        DeError::invalid_type(self.content.unexpected(), exp)
+        let mut buf = [0; 58];
+        DeError::invalid_type(self.content.unexpected(&mut buf), exp)
     }
 
     fn deserialize_integer<V>(self, visitor: V) -> Result<V::Value, E>
@@ -767,7 +769,11 @@ where
             }
             s @ Content::String(_) | s @ Content::Str(_) => (s, None),
             other => {
-                return Err(DeError::invalid_type(other.unexpected(), &"string or map"));
+                let mut buf = [0; 58];
+                return Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"string or map",
+                ));
             }
         };
 
@@ -913,7 +919,13 @@ where
                 SeqDeserializer::new(v, self.is_human_readable),
                 visitor,
             ),
-            Some(other) => Err(DeError::invalid_type(other.unexpected(), &"tuple variant")),
+            Some(other) => {
+                let mut buf = [0; 58];
+                Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"tuple variant",
+                ))
+            }
             None => Err(DeError::invalid_type(
                 Unexpected::UnitVariant,
                 &"tuple variant",
@@ -938,7 +950,13 @@ where
                 SeqDeserializer::new(v, self.is_human_readable),
                 visitor,
             ),
-            Some(other) => Err(DeError::invalid_type(other.unexpected(), &"struct variant")),
+            Some(other) => {
+                let mut buf = [0; 58];
+                Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"struct variant",
+                ))
+            }
             None => Err(DeError::invalid_type(
                 Unexpected::UnitVariant,
                 &"struct variant",
@@ -1123,13 +1141,14 @@ pub struct ContentRefDeserializer<'a, 'de, E> {
     err: PhantomData<E>,
 }
 
-impl<'a, 'de, E> ContentRefDeserializer<'a, 'de, E>
+impl<'de, E> ContentRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
     #[cold]
     fn invalid_type(self, exp: &dyn Expected) -> E {
-        DeError::invalid_type(self.content.unexpected(), exp)
+        let mut buf = [0; 58];
+        DeError::invalid_type(self.content.unexpected(&mut buf), exp)
     }
 
     fn deserialize_integer<V>(self, visitor: V) -> Result<V::Value, E>
@@ -1214,7 +1233,7 @@ where
 
 /// Used when deserializing an untagged enum because the content may need
 /// to be used more than once.
-impl<'de, 'a, E> Deserializer<'de> for ContentRefDeserializer<'a, 'de, E>
+impl<'de, E> Deserializer<'de> for ContentRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1542,7 +1561,11 @@ where
             }
             ref s @ Content::String(_) | ref s @ Content::Str(_) => (s, None),
             ref other => {
-                return Err(DeError::invalid_type(other.unexpected(), &"string or map"));
+                let mut buf = [0; 58];
+                return Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"string or map",
+                ));
             }
         };
 
@@ -1631,7 +1654,7 @@ where
     err: PhantomData<E>,
 }
 
-impl<'de, 'a, E> VariantAccess<'de> for VariantRefDeserializer<'a, 'de, E>
+impl<'de, E> VariantAccess<'de> for VariantRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1670,7 +1693,13 @@ where
                 SeqRefDeserializer::new(v, self.is_human_readable),
                 visitor,
             ),
-            Some(other) => Err(DeError::invalid_type(other.unexpected(), &"tuple variant")),
+            Some(other) => {
+                let mut buf = [0; 58];
+                Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"tuple variant",
+                ))
+            }
             None => Err(DeError::invalid_type(
                 Unexpected::UnitVariant,
                 &"tuple variant",
@@ -1695,7 +1724,13 @@ where
                 SeqRefDeserializer::new(v, self.is_human_readable),
                 visitor,
             ),
-            Some(other) => Err(DeError::invalid_type(other.unexpected(), &"struct variant")),
+            Some(other) => {
+                let mut buf = [0; 58];
+                Err(DeError::invalid_type(
+                    other.unexpected(&mut buf),
+                    &"struct variant",
+                ))
+            }
             None => Err(DeError::invalid_type(
                 Unexpected::UnitVariant,
                 &"struct variant",
@@ -1726,7 +1761,7 @@ where
     }
 }
 
-impl<'de, 'a, E> Deserializer<'de> for SeqRefDeserializer<'a, 'de, E>
+impl<'de, E> Deserializer<'de> for SeqRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1763,7 +1798,7 @@ where
     }
 }
 
-impl<'de, 'a, E> SeqAccess<'de> for SeqRefDeserializer<'a, 'de, E>
+impl<'de, E> SeqAccess<'de> for SeqRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1810,7 +1845,7 @@ where
     }
 }
 
-impl<'de, 'a, E> MapAccess<'de> for MapRefDeserializer<'a, 'de, E>
+impl<'de, E> MapAccess<'de> for MapRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1847,7 +1882,7 @@ where
     }
 }
 
-impl<'de, 'a, E> Deserializer<'de> for MapRefDeserializer<'a, 'de, E>
+impl<'de, E> Deserializer<'de> for MapRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {
@@ -1884,7 +1919,7 @@ where
     }
 }
 
-impl<'de, 'a, E> IntoDeserializer<'de, E> for ContentRefDeserializer<'a, 'de, E>
+impl<'de, E> IntoDeserializer<'de, E> for ContentRefDeserializer<'_, 'de, E>
 where
     E: DeError,
 {

@@ -2,6 +2,8 @@ pub(crate) use self::macros::*;
 use crate::{formats::*, prelude::*};
 #[cfg(feature = "hashbrown_0_14")]
 use hashbrown_0_14::{HashMap as HashbrownMap014, HashSet as HashbrownSet014};
+#[cfg(feature = "hashbrown_0_15")]
+use hashbrown_0_15::{HashMap as HashbrownMap015, HashSet as HashbrownSet015};
 #[cfg(feature = "indexmap_1")]
 use indexmap_1::{IndexMap, IndexSet};
 #[cfg(feature = "indexmap_2")]
@@ -32,6 +34,11 @@ pub(crate) mod macros {
                 HashbrownMap014<K: Eq + Hash, V, S: BuildHasher + Default>,
                 (|size| HashbrownMap014::with_capacity_and_hasher(size, Default::default()))
             );
+            #[cfg(feature = "hashbrown_0_15")]
+            $m!(
+                HashbrownMap015<K: Eq + Hash, V, S: BuildHasher + Default>,
+                (|size| HashbrownMap015::with_capacity_and_hasher(size, Default::default()))
+            );
             #[cfg(feature = "indexmap_1")]
             $m!(
                 IndexMap<K: Eq + Hash, V, S: BuildHasher + Default>,
@@ -59,6 +66,12 @@ pub(crate) mod macros {
             $m!(
                 HashbrownSet014<T: Eq + Hash, S: BuildHasher + Default>,
                 (|size| HashbrownSet014::with_capacity_and_hasher(size, S::default())),
+                insert
+            );
+            #[cfg(feature = "hashbrown_0_15")]
+            $m!(
+                HashbrownSet015<T: Eq + Hash, S: BuildHasher + Default>,
+                (|size| HashbrownSet015::with_capacity_and_hasher(size, S::default())),
                 insert
             );
             #[cfg(feature = "indexmap_1")]
@@ -868,7 +881,7 @@ where
         D: Deserializer<'de>,
     {
         struct Helper<S>(PhantomData<S>);
-        impl<'de, S> Visitor<'de> for Helper<S>
+        impl<S> Visitor<'_> for Helper<S>
         where
             S: FromStr,
             <S as FromStr>::Err: Display,
@@ -918,7 +931,7 @@ where
         D: Deserializer<'de>,
     {
         struct OptionStringEmptyNone<S>(PhantomData<S>);
-        impl<'de, S> Visitor<'de> for OptionStringEmptyNone<S>
+        impl<S> Visitor<'_> for OptionStringEmptyNone<S>
         where
             S: FromStr,
             S::Err: Display,
@@ -1036,7 +1049,7 @@ where
     {
         struct Helper<SEPARATOR, I, T>(PhantomData<(SEPARATOR, I, T)>);
 
-        impl<'de, SEPARATOR, I, T> Visitor<'de> for Helper<SEPARATOR, I, T>
+        impl<SEPARATOR, I, T> Visitor<'_> for Helper<SEPARATOR, I, T>
         where
             SEPARATOR: Separator,
             I: FromIterator<T>,
@@ -1811,7 +1824,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
         D: Deserializer<'de>,
     {
         struct U8Visitor;
-        impl<'de> Visitor<'de> for U8Visitor {
+        impl Visitor<'_> for U8Visitor {
             type Value = bool;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1826,7 +1839,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                     0 => Ok(false),
                     1 => Ok(true),
                     unexp => Err(DeError::invalid_value(
-                        Unexpected::Unsigned(unexp as u64),
+                        Unexpected::Unsigned(u64::from(unexp)),
                         &"0 or 1",
                     )),
                 }
@@ -1840,7 +1853,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                     0 => Ok(false),
                     1 => Ok(true),
                     unexp => Err(DeError::invalid_value(
-                        Unexpected::Signed(unexp as i64),
+                        Unexpected::Signed(i64::from(unexp)),
                         &"0 or 1",
                     )),
                 }
@@ -1878,10 +1891,13 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                 match v {
                     0 => Ok(false),
                     1 => Ok(true),
-                    unexp => Err(DeError::invalid_value(
-                        Unexpected::Unsigned(unexp as u64),
-                        &"0 or 1",
-                    )),
+                    unexp => {
+                        let mut buf: [u8; 58] = [0u8; 58];
+                        Err(DeError::invalid_value(
+                            crate::utils::get_unexpected_u128(unexp, &mut buf),
+                            &self,
+                        ))
+                    }
                 }
             }
 
@@ -1892,10 +1908,13 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                 match v {
                     0 => Ok(false),
                     1 => Ok(true),
-                    unexp => Err(DeError::invalid_value(
-                        Unexpected::Signed(unexp as i64),
-                        &"0 or 1",
-                    )),
+                    unexp => {
+                        let mut buf: [u8; 58] = [0u8; 58];
+                        Err(DeError::invalid_value(
+                            crate::utils::get_unexpected_i128(unexp, &mut buf),
+                            &"0 or 1",
+                        ))
+                    }
                 }
             }
         }
@@ -1910,7 +1929,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Flexible> {
         D: Deserializer<'de>,
     {
         struct U8Visitor;
-        impl<'de> Visitor<'de> for U8Visitor {
+        impl Visitor<'_> for U8Visitor {
             type Value = bool;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

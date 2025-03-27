@@ -7,6 +7,11 @@
 //!
 //! [time]: https://docs.rs/time/0.3/
 
+// Serialization of large numbers can result in overflows
+// The time calculations are prone to this, so lint here extra
+// https://github.com/jonasbb/serde_with/issues/771
+#![warn(clippy::as_conversions)]
+
 use crate::{
     formats::{Flexible, Format, Strict, Strictness},
     prelude::*,
@@ -539,7 +544,7 @@ impl<'de> DeserializeAs<'de, OffsetDateTime> for Rfc2822 {
         D: Deserializer<'de>,
     {
         struct Helper;
-        impl<'de> Visitor<'de> for Helper {
+        impl Visitor<'_> for Helper {
             type Value = OffsetDateTime;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -575,7 +580,7 @@ impl<'de> DeserializeAs<'de, OffsetDateTime> for Rfc3339 {
         D: Deserializer<'de>,
     {
         struct Helper;
-        impl<'de> Visitor<'de> for Helper {
+        impl Visitor<'_> for Helper {
             type Value = OffsetDateTime;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -611,7 +616,7 @@ impl<'de, const CONFIG: EncodedConfig> DeserializeAs<'de, OffsetDateTime> for Is
         D: Deserializer<'de>,
     {
         struct Helper<const CONFIG: EncodedConfig>;
-        impl<'de, const CONFIG: EncodedConfig> Visitor<'de> for Helper<CONFIG> {
+        impl<const CONFIG: EncodedConfig> Visitor<'_> for Helper<CONFIG> {
             type Value = OffsetDateTime;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

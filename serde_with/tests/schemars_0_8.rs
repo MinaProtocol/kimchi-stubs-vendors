@@ -1,3 +1,5 @@
+//! Test Cases
+
 use crate::utils::{check_matches_schema, check_valid_json_schema};
 use expect_test::expect_file;
 use schemars::JsonSchema;
@@ -44,6 +46,11 @@ macro_rules! declare_snapshot_test {
             }
 
             let schema = schemars::schema_for!($name);
+            let _ = jsonschema::Validator::new(
+                &serde_json::to_value(&schema).expect("generated schema is not valid json"),
+            )
+            .expect("generated schema is not valid");
+
             let mut schema = serde_json::to_string_pretty(&schema)
                 .expect("schema could not be serialized");
             schema.push('\n');
@@ -90,6 +97,22 @@ fn schemars_basic() {
 
     let expected = expect_file!["./schemars_0_8/schemars_basic.json"];
     expected.assert_eq(&schema);
+}
+
+#[test]
+fn schemars_other_cfg_attrs() {
+    #[serde_as]
+    #[derive(JsonSchema, Serialize)]
+    struct Test {
+        #[serde_as(as = "DisplayFromStr")]
+        #[cfg_attr(any(), arbitrary("some" |weird| syntax::<bool, 2>()))]
+        #[cfg_attr(any(), schemars(with = "i32"))]
+        custom: i32,
+    }
+
+    check_matches_schema::<Test>(&json!({
+        "custom": "23",
+    }));
 }
 
 #[test]
@@ -404,6 +427,14 @@ mod snapshots {
             struct Test {
                 #[serde_as(as = "PickFirst<(_, DisplayFromStr)>")]
                 value: u32
+            }
+        }
+
+        pickfirst_nested {
+            #[serde(transparent)]
+            struct Test {
+                #[serde_as(as = "OneOrMany<PickFirst<(_, DisplayFromStr)>>")]
+                optional_value: Vec<u32>
             }
         }
 
