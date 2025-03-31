@@ -52,6 +52,7 @@ struct LocalFile {
     path: PathBuf,
     definition: Span,
     new_identifier: String,
+    linked_module: bool,
 }
 
 impl Interner {
@@ -85,7 +86,12 @@ impl Interner {
     ///
     /// Note that repeated invocations of this function will be memoized, so the
     /// same `id` will always return the same resulting unique `id`.
-    fn resolve_import_module(&self, id: &str, span: Span) -> Result<ImportModule, Diagnostic> {
+    fn resolve_import_module(
+        &self,
+        id: &str,
+        span: Span,
+        linked_module: bool,
+    ) -> Result<ImportModule, Diagnostic> {
         let mut files = self.files.borrow_mut();
         if let Some(file) = files.get(id) {
             return Ok(ImportModule::Named(self.intern_str(&file.new_identifier)));
@@ -107,10 +113,11 @@ impl Interner {
             path,
             definition: span,
             new_identifier,
+            linked_module,
         };
         files.insert(id.to_string(), file);
         drop(files);
-        self.resolve_import_module(id, span)
+        self.resolve_import_module(id, span, linked_module)
     }
 
     fn unique_crate_identifier(&self) -> String {
@@ -169,6 +176,7 @@ fn shared_program<'a>(
                     .map(|s| LocalModule {
                         identifier: intern.intern_str(&file.new_identifier),
                         contents: intern.intern_str(&s),
+                        linked_module: file.linked_module,
                     })
                     .map_err(|e| {
                         let msg = format!("failed to read file `{}`: {}", file.path.display(), e);
@@ -207,30 +215,41 @@ fn shared_export<'a>(
 }
 
 fn shared_function<'a>(func: &'a ast::Function, _intern: &'a Interner) -> Function<'a> {
-    let arg_names = func
-        .arguments
-        .iter()
-        .enumerate()
-        .map(|(idx, arg)| {
-            if let syn::Pat::Ident(x) = &*arg.pat {
-                return x.ident.unraw().to_string();
-            }
-            format!("arg{}", idx)
-        })
-        .collect::<Vec<_>>();
+    let args =
+        func.arguments
+            .iter()
+            .enumerate()
+            .map(|(idx, arg)| FunctionArgumentData {
+                // use argument's "js_name" if it was provided via attributes
+                // if not use the original Rust argument ident
+                name: arg.js_name.clone().unwrap_or(
+                    if let syn::Pat::Ident(x) = &*arg.pat_type.pat {
+                        x.ident.unraw().to_string()
+                    } else {
+                        format!("arg{}", idx)
+                    },
+                ),
+                ty_override: arg.js_type.as_deref(),
+                desc: arg.desc.as_deref(),
+            })
+            .collect::<Vec<_>>();
+
     Function {
-        arg_names,
+        args,
         asyncness: func.r#async,
         name: &func.name,
         generate_typescript: func.generate_typescript,
         generate_jsdoc: func.generate_jsdoc,
         variadic: func.variadic,
+        ret_ty_override: func.ret.as_ref().and_then(|v| v.js_type.as_deref()),
+        ret_desc: func.ret.as_ref().and_then(|v| v.desc.as_deref()),
     }
 }
 
 fn shared_enum<'a>(e: &'a ast::Enum, intern: &'a Interner) -> Enum<'a> {
     Enum {
         name: &e.js_name,
+        signed: e.signed,
         variants: e
             .variants
             .iter()
@@ -254,7 +273,7 @@ fn shared_import<'a>(i: &'a ast::Import, intern: &'a Interner) -> Result<Import<
         module: i
             .module
             .as_ref()
-            .map(|m| shared_module(m, intern))
+            .map(|m| shared_module(m, intern, false))
             .transpose()?,
         js_namespace: i.js_namespace.clone(),
         kind: shared_import_kind(&i.kind, intern)?,
@@ -274,7 +293,7 @@ fn shared_linked_module<'a>(
     intern: &'a Interner,
 ) -> Result<LinkedModule<'a>, Diagnostic> {
     Ok(LinkedModule {
-        module: shared_module(i, intern)?,
+        module: shared_module(i, intern, true)?,
         link_function_name: intern.intern_str(name),
     })
 }
@@ -282,9 +301,12 @@ fn shared_linked_module<'a>(
 fn shared_module<'a>(
     m: &'a ast::ImportModule,
     intern: &'a Interner,
+    linked_module: bool,
 ) -> Result<ImportModule<'a>, Diagnostic> {
     Ok(match m {
-        ast::ImportModule::Named(m, span) => intern.resolve_import_module(m, *span)?,
+        ast::ImportModule::Named(m, span) => {
+            intern.resolve_import_module(m, *span, linked_module)?
+        }
         ast::ImportModule::RawNamed(m, _span) => ImportModule::RawNamed(intern.intern_str(m)),
         ast::ImportModule::Inline(idx, _) => ImportModule::Inline(*idx as u32),
     })
@@ -348,8 +370,13 @@ fn shared_import_type<'a>(i: &'a ast::ImportType, intern: &'a Interner) -> Impor
     }
 }
 
-fn shared_import_enum<'a>(_i: &'a ast::StringEnum, _intern: &'a Interner) -> StringEnum {
-    StringEnum {}
+fn shared_import_enum<'a>(i: &'a ast::StringEnum, _intern: &'a Interner) -> StringEnum<'a> {
+    StringEnum {
+        name: &i.js_name,
+        generate_typescript: i.generate_typescript,
+        variant_values: i.variant_values.iter().map(|x| &**x).collect(),
+        comments: i.comments.iter().map(|s| &**s).collect(),
+    }
 }
 
 fn shared_struct<'a>(s: &'a ast::Struct, intern: &'a Interner) -> Struct<'a> {
@@ -389,7 +416,7 @@ enum LitOrExpr<'a> {
     Lit(&'a str),
 }
 
-impl<'a> Encode for LitOrExpr<'a> {
+impl Encode for LitOrExpr<'_> {
     fn encode(&self, dst: &mut Encoder) {
         match self {
             LitOrExpr::Expr(expr) => {
@@ -451,14 +478,14 @@ impl Encode for usize {
     }
 }
 
-impl<'a> Encode for &'a [u8] {
+impl Encode for &[u8] {
     fn encode(&self, dst: &mut Encoder) {
         self.len().encode(dst);
         dst.extend_from_slice(self);
     }
 }
 
-impl<'a> Encode for &'a str {
+impl Encode for &str {
     fn encode(&self, dst: &mut Encoder) {
         self.as_bytes().encode(dst);
     }
