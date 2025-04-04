@@ -1,60 +1,61 @@
-# MessagePack + Serde
+# RMP - Rust MessagePack
 
-This crate connects Rust MessagePack library with [`serde`][serde] providing an ability to
-easily serialize and deserialize both Rust built-in types, the standard library and custom data
-structures.
+RMP is a pure Rust [MessagePack](http://msgpack.org) implementation.
 
-## Motivating example
+[![Build Status](https://travis-ci.org/3Hren/msgpack-rust.svg?branch=master)](https://travis-ci.org/3Hren/msgpack-rust)
+[![Coverage Status][coveralls-img]][coveralls-url]
 
-```rust
-let buf = rmp_serde::to_vec(&(42, "the Answer")).unwrap();
+This repository consists of three separate crates: the RMP core and two implementations to ease serializing and
+deserializing Rust structs.
 
-assert_eq!(
-    vec![0x92, 0x2a, 0xaa, 0x74, 0x68, 0x65, 0x20, 0x41, 0x6e, 0x73, 0x77, 0x65, 0x72],
-    buf
-);
+ crates.rs                                 | API Documentation               |
+-------------------------------------------|---------------------------------|
+ [![rmp][crates-rmp-img]][crates-rmp-url]     | [RMP][rmp-docs-url]             |
+ [![rmps][crates-rmps-img]][crates-rmps-url]   | [RMP Serde][rmps-docs-url]      |
+ [![rmpv][crates-rmpv-img]][crates-rmpv-url]   | [RMP Value][rmpv-docs-url]      |
 
-assert_eq!((42, "the Answer"), rmp_serde::from_slice(&buf).unwrap());
-```
+## Features
 
-## Type-based Serialization and Deserialization
+- **Convenient API**
 
-Serde provides a mechanism for low boilerplate serialization & deserialization of values to and
-from MessagePack via the serialization API.
+  RMP is designed to be lightweight and straightforward. There are low-level API, which gives you
+  full control on data encoding/decoding process and makes no heap allocations. On the other hand
+  there are high-level API, which provides you convenient interface using Rust standard library and
+  compiler reflection, allowing to encode/decode structures using `derive` attribute.
 
-To be able to serialize a piece of data, it must implement the `serde::Serialize` trait. To be
-able to deserialize a piece of data, it must implement the `serde::Deserialize` trait. Serde
-provides an annotation to automatically generate the code for these
-traits: `#[derive(Serialize, Deserialize)]`.
+- **Zero-copy value decoding**
 
-## Examples
+  RMP allows to decode bytes from a buffer in a zero-copy manner easily and blazingly fast, while Rust
+  static checks guarantees that the data will be valid as long as the buffer lives.
 
-```rust
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use rmp_serde::{Deserializer, Serializer};
+- **Clear error handling**
 
-#[derive(Debug, PartialEq, Deserialize, Serialize)]
-struct Human {
-    age: u32,
-    name: String,
-}
+  RMP's error system guarantees that you never receive an error enum with unreachable variant.
 
-fn main() {
-    let mut buf = Vec::new();
-    let val = Human {
-        age: 42,
-        name: "John".into(),
-    };
+- **Robust and tested**
 
-    val.serialize(&mut Serializer::new(&mut buf)).unwrap();
-}
-```
+  This project is developed using TDD and CI, so any found bugs will be fixed without breaking
+  existing functionality.
 
-## Efficient storage of `&[u8]` types
+## Requirements
 
-MessagePack can efficiently store binary data. However, Serde's standard derived implementations *do not* use binary representations by default. Serde prefers to represent types like `&[u8; N]` or `Vec<u8>` as arrays of objects of arbitrary/unknown type, and not as slices of bytes. This creates about a 50% overhead in storage size.
+- Rust 1.53.0 or later
 
-Wrap your data in [`serde_bytes`](https://lib.rs/crates/serde_bytes) to store blobs quickly and efficiently. Alternatively, [configure an override in `rmp_serde` to force use of byte slices](https://docs.rs/rmp-serde/latest/rmp_serde/encode/struct.Serializer.html#method.with_bytes).
+[rustc-serialize]: https://github.com/rust-lang-nursery/rustc-serialize
+[serde]: https://github.com/serde-rs/serde
 
-[serde]: https://serde.rs/
+[coveralls-img]: https://coveralls.io/repos/3Hren/msgpack-rust/badge.svg?branch=master&service=github
+[coveralls-url]: https://coveralls.io/github/3Hren/msgpack-rust?branch=master
+
+[rmp-docs-url]: https://docs.rs/rmp
+[rmps-docs-url]: https://docs.rs/rmp-serde
+[rmpv-docs-url]: https://docs.rs/rmpv
+
+[crates-rmp-img]: https://img.shields.io/crates/v/rmp.svg
+[crates-rmp-url]: https://lib.rs/crates/rmp
+
+[crates-rmps-img]: https://img.shields.io/crates/v/rmp-serde.svg
+[crates-rmps-url]: https://lib.rs/crates/rmp-serde
+
+[crates-rmpv-img]: https://img.shields.io/crates/v/rmpv.svg
+[crates-rmpv-url]: https://lib.rs/crates/rmpv

@@ -3,7 +3,6 @@
 //! Big integer type definition.
 
 use super::math::*;
-#[allow(unused_imports)]
 use alloc::vec::Vec;
 
 /// Storage for a big integer type.
