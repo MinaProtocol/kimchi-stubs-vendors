@@ -507,43 +507,6 @@ fn round_variant_string() {
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
-fn roundtrip_tuples_arrays() {
-    assert_roundtrips((1i32,100,1000,10000,100000,1000000,10000000));
-    assert_roundtrips((0u8,1u8,11u8,111u8,255u8));
-    assert_roundtrips((0u8,1i8,11u16,111i32,255i64));
-    assert_roundtrips((0i8,1,11,111,-1,-11,-111));
-    assert_roundtrips((0u128, 1111111u128));
-
-    assert_roundtrips([1i32,100,1000,10000,100000,1000000,10000000]);
-    assert_roundtrips([0u8,1,11,111,255]);
-    assert_roundtrips([0i8,1,11,111,-1,-11,-111]);
-    assert_roundtrips([(0u128, 1111111u128)]);
-}
-
-#[test]
-fn roundtrip_vec() {
-    assert_roundtrips(vec![1i32,100,1000,10000,100000,1000000,10000000]);
-    assert_roundtrips(vec![0u8,1,11,111,255]);
-    assert_roundtrips(vec![0i8,1,11,111,-1,-11,-111]);
-    assert_roundtrips(vec![(0u8, 1u8)]);
-    assert_roundtrips(vec![(0u8, 1u32)]);
-    assert_roundtrips(vec![] as Vec<String>);
-    assert_roundtrips(vec![] as Vec<u8>);
-    assert_roundtrips(vec![] as Vec<()>);
-    assert_roundtrips(vec![] as Vec<Vec<()>>);
-    assert_roundtrips(vec![vec![1u128,2,3]]);
-    assert_roundtrips(vec![vec![Some(3u16),None,Some(10000)]]);
-}
-
-#[test]
-fn roundtrip_hashsets() {
-    use std::collections::HashSet;
-    assert_roundtrips([1i32,100,1000,10000,100000,1000000,10000000].into_iter().collect::<HashSet<_>>());
-    assert_roundtrips([0u8,1,11,111,255].into_iter().collect::<HashSet<_>>());
-    assert_roundtrips([0i8,1,11,111,-1,-11,-111].into_iter().collect::<HashSet<_>>());
-}
-
-#[test]
 fn roundtrip_ipv4addr() {
     assert_roundtrips(Ipv4Addr::new(127, 0, 0, 1));
 }
@@ -669,8 +632,6 @@ fn roundtrip_some_failures() {
 #[cfg(test)]
 #[track_caller]
 fn assert_roundtrips<T: PartialEq + std::fmt::Debug + Serialize + for<'a> Deserialize<'a>>(val: T) {
-    use rmp_serde::config::BytesMode;
-
     assert_roundtrips_config(&val, "default", |s| s, |d| d);
     assert_roundtrips_config(&val, ".with_struct_map()", |s| s.with_struct_map(), |d| d);
     assert_roundtrips_config(
@@ -705,18 +666,6 @@ fn assert_roundtrips<T: PartialEq + std::fmt::Debug + Serialize + for<'a> Deseri
                 .with_struct_map()
         },
         |d| d.with_human_readable(),
-    );
-    assert_roundtrips_config(
-        &val,
-        ".with_bytes(ForceIterables)",
-        |s| s.with_bytes(BytesMode::ForceIterables),
-        |d| d,
-    );
-    assert_roundtrips_config(
-        &val,
-        ".with_bytes(ForceAll)",
-        |s| s.with_bytes(BytesMode::ForceAll),
-        |d| d,
     );
 }
 

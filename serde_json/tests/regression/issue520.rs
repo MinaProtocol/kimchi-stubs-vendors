@@ -1,6 +1,6 @@
 #![allow(clippy::float_cmp)]
 
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]

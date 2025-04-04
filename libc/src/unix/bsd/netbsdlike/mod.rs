@@ -861,8 +861,6 @@ extern "C" {
         flags: c_int,
         timeout: *mut crate::timespec,
     ) -> c_int;
-
-    pub fn closefrom(lowfd: c_int) -> c_int;
 }
 
 cfg_if! {

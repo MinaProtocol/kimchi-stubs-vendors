@@ -25,7 +25,7 @@ pub(crate) fn lower_n_mask(n: u64) -> u64 {
     debug_assert!(n <= bits, "lower_n_mask() overflow in shl.");
 
     if n == bits {
-        u64::MAX
+        u64::max_value()
     } else {
         (1 << n) - 1
     }

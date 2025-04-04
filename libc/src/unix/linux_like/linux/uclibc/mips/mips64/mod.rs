@@ -3,6 +3,9 @@ use crate::prelude::*;
 
 pub type blkcnt_t = i64;
 pub type blksize_t = i64;
+pub type c_char = i8;
+pub type c_long = i64;
+pub type c_ulong = u64;
 pub type fsblkcnt_t = c_ulong;
 pub type fsfilcnt_t = c_ulong;
 pub type ino_t = u64;
@@ -120,7 +123,7 @@ s! {
         pub msg_stime: crate::time_t,
         pub msg_rtime: crate::time_t,
         pub msg_ctime: crate::time_t,
-        pub __msg_cbytes: c_ulong,
+        __msg_cbytes: c_ulong,
         pub msg_qnum: crate::msgqnum_t,
         pub msg_qbytes: crate::msglen_t,
         pub msg_lspid: crate::pid_t,

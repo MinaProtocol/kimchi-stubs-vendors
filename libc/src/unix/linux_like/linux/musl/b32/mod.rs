@@ -1,5 +1,7 @@
 use crate::prelude::*;
 
+pub type c_long = i32;
+pub type c_ulong = u32;
 pub type nlink_t = u32;
 pub type blksize_t = c_long;
 pub type __u64 = c_ulonglong;

@@ -1,5 +1,7 @@
-use crate::prelude::*;
 use crate::pthread_mutex_t;
+
+pub type c_long = i32;
+pub type c_ulong = u32;
 
 pub const __SIZEOF_PTHREAD_CONDATTR_T: usize = 4;
 pub const __SIZEOF_PTHREAD_MUTEX_T: usize = 32;

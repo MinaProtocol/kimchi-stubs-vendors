@@ -12,7 +12,7 @@
     redundant_semicolons,
     unused_macros,
     unused_macro_rules,
-    // FIXME(1.0): temporarily allow dead_code to fix CI:
+    // FIXME: temporarily allow dead_code to fix CI:
     // - https://github.com/rust-lang/libc/issues/3740
     // - https://github.com/rust-lang/rust/pull/126456
     dead_code,
@@ -41,106 +41,144 @@ cfg_if! {
 
 pub use core::ffi::c_void;
 
+/// Type definitions that are coupled tighter to architecture than OS.
+mod arch {
+    cfg_if! {
+        // This configuration comes from `rust-lang/rust` in `library/core/src/ffi/mod.rs`.
+        if #[cfg(all(
+            not(windows),
+            // FIXME(ctest): just use `target_vendor` = "apple"` once `ctest` supports it
+            not(any(
+                target_os = "macos",
+                target_os = "ios",
+                target_os = "tvos",
+                target_os = "watchos",
+                target_os = "visionos",
+            )),
+            any(
+                target_arch = "aarch64",
+                target_arch = "arm",
+                target_arch = "csky",
+                target_arch = "hexagon",
+                target_arch = "msp430",
+                target_arch = "powerpc",
+                target_arch = "powerpc64",
+                target_arch = "riscv64",
+                target_arch = "riscv32",
+                target_arch = "s390x",
+                target_arch = "xtensa",
+            )
+        ))] {
+            // To be reexported as `c_char`
+            // FIXME(ctest): just name these `c_char` once `ctest` learns that these don't get
+            // exported.
+            pub type c_char_def = u8;
+        } else {
+            pub type c_char_def = i8;
+        }
+    }
+}
+
 cfg_if! {
     if #[cfg(windows)] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod windows;
         pub use crate::windows::*;
 
         prelude!();
     } else if #[cfg(target_os = "fuchsia")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod fuchsia;
         pub use crate::fuchsia::*;
 
         prelude!();
     } else if #[cfg(target_os = "switch")] {
-        mod primitives;
-        pub use primitives::*;
+        mod fixed_width_ints;
+        pub use fixed_width_ints::*;
 
         mod switch;
         pub use switch::*;
 
         prelude!();
     } else if #[cfg(target_os = "psp")] {
-        mod primitives;
-        pub use primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod psp;
         pub use crate::psp::*;
 
         prelude!();
     } else if #[cfg(target_os = "vxworks")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod vxworks;
         pub use crate::vxworks::*;
 
         prelude!();
     } else if #[cfg(target_os = "solid_asp3")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod solid;
         pub use crate::solid::*;
 
         prelude!();
     } else if #[cfg(unix)] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod unix;
         pub use crate::unix::*;
 
         prelude!();
     } else if #[cfg(target_os = "hermit")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod hermit;
         pub use crate::hermit::*;
 
         prelude!();
     } else if #[cfg(target_os = "teeos")] {
-        mod primitives;
-        pub use primitives::*;
+        mod fixed_width_ints;
+        pub use fixed_width_ints::*;
 
         mod teeos;
         pub use teeos::*;
 
         prelude!();
     } else if #[cfg(target_os = "trusty")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod trusty;
         pub use crate::trusty::*;
 
         prelude!();
     } else if #[cfg(all(target_env = "sgx", target_vendor = "fortanix"))] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod sgx;
         pub use crate::sgx::*;
 
         prelude!();
     } else if #[cfg(any(target_env = "wasi", target_os = "wasi"))] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod wasi;
         pub use crate::wasi::*;
 
         prelude!();
     } else if #[cfg(target_os = "xous")] {
-        mod primitives;
-        pub use crate::primitives::*;
+        mod fixed_width_ints;
+        pub use crate::fixed_width_ints::*;
 
         mod xous;
         pub use crate::xous::*;
