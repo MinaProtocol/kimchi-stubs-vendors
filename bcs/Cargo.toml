@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "bcs"
-version = "0.1.5"
+version = "0.1.6"
 description = "Binary Canonical Serialization (BCS)"
 readme = "README.md"
 license = "Apache-2.0"

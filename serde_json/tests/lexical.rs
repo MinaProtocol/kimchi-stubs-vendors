@@ -12,6 +12,7 @@
     clippy::let_underscore_untyped,
     clippy::module_name_repetitions,
     clippy::needless_late_init,
+    clippy::question_mark,
     clippy::shadow_unrelated,
     clippy::similar_names,
     clippy::single_match_else,
@@ -25,11 +26,6 @@ extern crate alloc;
 
 #[path = "../src/lexical/mod.rs"]
 mod lexical;
-
-mod lib {
-    pub use std::vec::Vec;
-    pub use std::{cmp, iter, mem, ops};
-}
 
 #[path = "lexical/algorithm.rs"]
 mod algorithm;

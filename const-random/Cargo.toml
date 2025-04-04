@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "const-random"
-version = "0.1.15"
+version = "0.1.18"
 authors = ["Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"]
 description = "Provides compile time random number generation."
 documentation = "https://docs.rs/const-random"
@@ -26,7 +26,4 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/tkaitchuck/constrandom"
 
 [dependencies.const-random-macro]
-version = "0.1.15"
-
-[dependencies.proc-macro-hack]
-version = "0.5"
+version = "0.1.16"

@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "const-random-macro"
-version = "0.1.15"
+version = "0.1.16"
 authors = ["Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"]
 description = "Provides the procedural macro used by const-random"
 documentation = "https://docs.rs/const-random"
@@ -37,9 +37,6 @@ features = [
     "alloc",
 ]
 default-features = false
-
-[dependencies.proc-macro-hack]
-version = "0.5.13"
 
 [dependencies.tiny-keccak]
 version = "2.0.2"

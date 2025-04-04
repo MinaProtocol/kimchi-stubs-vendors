@@ -99,9 +99,9 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 /// the boxed form of `RawValue` instead. This is almost as efficient but
 /// involves buffering the raw value from the I/O stream into memory.
 ///
-/// [`serde_json::from_str`]: ../fn.from_str.html
-/// [`serde_json::from_slice`]: ../fn.from_slice.html
-/// [`serde_json::from_reader`]: ../fn.from_reader.html
+/// [`serde_json::from_str`]: crate::from_str
+/// [`serde_json::from_slice`]: crate::from_slice
+/// [`serde_json::from_reader`]: crate::from_reader
 ///
 /// ```
 /// # use serde::Deserialize;
@@ -112,14 +112,14 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 ///     raw_value: Box<RawValue>,
 /// }
 /// ```
-#[cfg_attr(not(doc), repr(transparent))]
 #[cfg_attr(docsrs, doc(cfg(feature = "raw_value")))]
+#[repr(transparent)]
 pub struct RawValue {
     json: str,
 }
 
 impl RawValue {
-    fn from_borrowed(json: &str) -> &Self {
+    const fn from_borrowed(json: &str) -> &Self {
         unsafe { mem::transmute::<&str, &RawValue>(json) }
     }
 
@@ -148,7 +148,7 @@ impl ToOwned for RawValue {
 
 impl Default for Box<RawValue> {
     fn default() -> Self {
-        RawValue::from_borrowed("null").to_owned()
+        RawValue::NULL.to_owned()
     }
 }
 
@@ -168,6 +168,13 @@ impl Display for RawValue {
 }
 
 impl RawValue {
+    /// A constant RawValue with the JSON value `null`.
+    pub const NULL: &'static RawValue = RawValue::from_borrowed("null");
+    /// A constant RawValue with the JSON value `true`.
+    pub const TRUE: &'static RawValue = RawValue::from_borrowed("true");
+    /// A constant RawValue with the JSON value `false`.
+    pub const FALSE: &'static RawValue = RawValue::from_borrowed("false");
+
     /// Convert an owned `String` of JSON data to an owned `RawValue`.
     ///
     /// This function is equivalent to `serde_json::from_str::<Box<RawValue>>`
@@ -525,5 +532,253 @@ impl<'de> MapAccess<'de> for BorrowedRawDeserializer<'de> {
         V: de::DeserializeSeed<'de>,
     {
         seed.deserialize(BorrowedStrDeserializer::new(self.raw_value.take().unwrap()))
+    }
+}
+
+impl<'de> IntoDeserializer<'de, Error> for &'de RawValue {
+    type Deserializer = &'de RawValue;
+
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
+impl<'de> Deserializer<'de> for &'de RawValue {
+    type Error = Error;
+
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_any(visitor)
+    }
+
+    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_bool(visitor)
+    }
+
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_i8(visitor)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_i16(visitor)
+    }
+
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_i32(visitor)
+    }
+
+    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_i64(visitor)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_i128(visitor)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_u8(visitor)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_u16(visitor)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_u32(visitor)
+    }
+
+    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_u64(visitor)
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_u128(visitor)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_f32(visitor)
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_f64(visitor)
+    }
+
+    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_char(visitor)
+    }
+
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_str(visitor)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_string(visitor)
+    }
+
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_bytes(visitor)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_byte_buf(visitor)
+    }
+
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_option(visitor)
+    }
+
+    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_unit(visitor)
+    }
+
+    fn deserialize_unit_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_unit_struct(name, visitor)
+    }
+
+    fn deserialize_newtype_struct<V>(
+        self,
+        name: &'static str,
+        visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_newtype_struct(name, visitor)
+    }
+
+    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_seq(visitor)
+    }
+
+    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_tuple(len, visitor)
+    }
+
+    fn deserialize_tuple_struct<V>(
+        self,
+        name: &'static str,
+        len: usize,
+        visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_tuple_struct(name, len, visitor)
+    }
+
+    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_map(visitor)
+    }
+
+    fn deserialize_struct<V>(
+        self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_struct(name, fields, visitor)
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_enum(name, variants, visitor)
+    }
+
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_identifier(visitor)
+    }
+
+    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        crate::Deserializer::from_str(&self.json).deserialize_ignored_any(visitor)
     }
 }
