@@ -1,6 +1,7 @@
 use crate::off_t;
 use crate::prelude::*;
 
+pub type c_char = i8;
 pub type wchar_t = i32;
 
 s! {
@@ -94,7 +95,7 @@ s! {
         __unused2: c_int,
         pub msg_ctime: crate::time_t,
         __unused3: c_int,
-        pub __msg_cbytes: c_ulong,
+        __msg_cbytes: c_ulong,
         pub msg_qnum: crate::msgqnum_t,
         pub msg_qbytes: crate::msglen_t,
         pub msg_lspid: crate::pid_t,
@@ -610,11 +611,9 @@ pub const SYS_modify_ldt: c_long = 123;
 pub const SYS_adjtimex: c_long = 124;
 pub const SYS_mprotect: c_long = 125;
 pub const SYS_sigprocmask: c_long = 126;
-#[deprecated(since = "0.2.70", note = "Functional up to 2.6 kernel")]
 pub const SYS_create_module: c_long = 127;
 pub const SYS_init_module: c_long = 128;
 pub const SYS_delete_module: c_long = 129;
-#[deprecated(since = "0.2.70", note = "Functional up to 2.6 kernel")]
 pub const SYS_get_kernel_syms: c_long = 130;
 pub const SYS_quotactl: c_long = 131;
 pub const SYS_getpgid: c_long = 132;
@@ -652,7 +651,6 @@ pub const SYS_mremap: c_long = 163;
 pub const SYS_setresuid: c_long = 164;
 pub const SYS_getresuid: c_long = 165;
 pub const SYS_vm86: c_long = 166;
-#[deprecated(since = "0.2.70", note = "Functional up to 2.6 kernel")]
 pub const SYS_query_module: c_long = 167;
 pub const SYS_poll: c_long = 168;
 pub const SYS_nfsservctl: c_long = 169;

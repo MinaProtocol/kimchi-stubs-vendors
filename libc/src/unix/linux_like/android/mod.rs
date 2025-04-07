@@ -517,11 +517,6 @@ s! {
         pub ifr6_prefixlen: u32,
         pub ifr6_ifindex: c_int,
     }
-
-    pub struct if_nameindex {
-        pub if_index: c_uint,
-        pub if_name: *mut c_char,
-    }
 }
 
 s_no_extra_traits! {
@@ -704,7 +699,7 @@ cfg_if! {
                     .field("d_off", &self.d_off)
                     .field("d_reclen", &self.d_reclen)
                     .field("d_type", &self.d_type)
-                    // FIXME(debug): .field("d_name", &self.d_name)
+                    // FIXME: .field("d_name", &self.d_name)
                     .finish()
             }
         }
@@ -742,7 +737,7 @@ cfg_if! {
                     .field("d_off", &self.d_off)
                     .field("d_reclen", &self.d_reclen)
                     .field("d_type", &self.d_type)
-                    // FIXME(debug): .field("d_name", &self.d_name)
+                    // FIXME: .field("d_name", &self.d_name)
                     .finish()
             }
         }
@@ -814,7 +809,7 @@ cfg_if! {
                 f.debug_struct("lastlog")
                     .field("ll_time", &self.ll_time)
                     .field("ll_line", &self.ll_line)
-                    // FIXME(debug): .field("ll_host", &self.ll_host)
+                    // FIXME: .field("ll_host", &self.ll_host)
                     .finish()
             }
         }
@@ -865,7 +860,7 @@ cfg_if! {
                     .field("ut_line", &self.ut_line)
                     .field("ut_id", &self.ut_id)
                     .field("ut_user", &self.ut_user)
-                    // FIXME(debug): .field("ut_host", &self.ut_host)
+                    // FIXME: .field("ut_host", &self.ut_host)
                     .field("ut_exit", &self.ut_exit)
                     .field("ut_session", &self.ut_session)
                     .field("ut_tv", &self.ut_tv)
@@ -1305,7 +1300,6 @@ pub const F_TLOCK: c_int = 2;
 pub const F_ULOCK: c_int = 0;
 
 pub const F_SEAL_FUTURE_WRITE: c_int = 0x0010;
-pub const F_SEAL_EXEC: c_int = 0x0020;
 
 pub const IFF_LOWER_UP: c_int = 0x10000;
 pub const IFF_DORMANT: c_int = 0x20000;
@@ -1480,7 +1474,6 @@ pub const SOCK_STREAM: c_int = 1;
 pub const SOCK_DGRAM: c_int = 2;
 pub const SOCK_SEQPACKET: c_int = 5;
 pub const SOCK_DCCP: c_int = 6;
-#[deprecated(since = "0.2.70", note = "AF_PACKET must be used instead")]
 pub const SOCK_PACKET: c_int = 10;
 
 pub const IPPROTO_MAX: c_int = 256;
@@ -2949,9 +2942,6 @@ pub const SOF_TIMESTAMPING_OPT_TSONLY: c_uint = 1 << 11;
 pub const SOF_TIMESTAMPING_OPT_STATS: c_uint = 1 << 12;
 pub const SOF_TIMESTAMPING_OPT_PKTINFO: c_uint = 1 << 13;
 pub const SOF_TIMESTAMPING_OPT_TX_SWHW: c_uint = 1 << 14;
-pub const SOF_TIMESTAMPING_BIND_PHC: c_uint = 1 << 15;
-pub const SOF_TIMESTAMPING_OPT_ID_TCP: c_uint = 1 << 16;
-pub const SOF_TIMESTAMPING_OPT_RX_FILTER: c_uint = 1 << 17;
 
 #[deprecated(
     since = "0.2.55",
@@ -3578,10 +3568,6 @@ pub const AT_RSEQ_ALIGN: c_ulong = 28;
 pub const AT_EXECFN: c_ulong = 31;
 pub const AT_MINSIGSTKSZ: c_ulong = 51;
 
-// siginfo.h
-pub const SI_DETHREAD: c_int = -7;
-pub const TRAP_PERF: c_int = 6;
-
 // Most `*_SUPER_MAGIC` constants are defined at the `linux_like` level; the
 // following are only available on newer Linux versions than the versions
 // currently used in CI in some configurations, so we define them here.
@@ -3653,6 +3639,12 @@ f! {
         set1.__bits == set2.__bits
     }
 
+    pub fn major(dev: crate::dev_t) -> c_int {
+        ((dev >> 8) & 0xfff) as c_int
+    }
+    pub fn minor(dev: crate::dev_t) -> c_int {
+        ((dev & 0xff) | ((dev >> 12) & 0xfff00)) as c_int
+    }
     pub fn NLA_ALIGN(len: c_int) -> c_int {
         return ((len) + NLA_ALIGNTO - 1) & !(NLA_ALIGNTO - 1);
     }
@@ -3667,14 +3659,6 @@ safe_f! {
         let ma = ma as crate::dev_t;
         let mi = mi as crate::dev_t;
         ((ma & 0xfff) << 8) | (mi & 0xff) | ((mi & 0xfff00) << 12)
-    }
-
-    pub {const} fn major(dev: crate::dev_t) -> c_int {
-        ((dev >> 8) & 0xfff) as c_int
-    }
-
-    pub {const} fn minor(dev: crate::dev_t) -> c_int {
-        ((dev & 0xff) | ((dev >> 12) & 0xfff00)) as c_int
     }
 }
 
@@ -4142,9 +4126,6 @@ extern "C" {
         newpath: *const c_char,
         flags: c_uint,
     ) -> c_int;
-
-    pub fn if_nameindex() -> *mut if_nameindex;
-    pub fn if_freenameindex(ptr: *mut if_nameindex);
 }
 
 cfg_if! {

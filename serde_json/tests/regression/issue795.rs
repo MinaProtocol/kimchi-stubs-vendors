@@ -8,10 +8,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum Enum {
-    Variant {
-        #[allow(dead_code)]
-        x: u8,
-    },
+    Variant { x: u8 },
 }
 
 impl<'de> Deserialize<'de> for Enum {

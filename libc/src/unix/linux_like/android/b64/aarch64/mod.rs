@@ -1,6 +1,7 @@
 use crate::off64_t;
 use crate::prelude::*;
 
+pub type c_char = u8;
 pub type wchar_t = u32;
 pub type __u64 = c_ulonglong;
 pub type __s64 = c_longlong;

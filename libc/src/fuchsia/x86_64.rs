@@ -1,6 +1,7 @@
 use crate::off_t;
 use crate::prelude::*;
 
+pub type c_char = i8;
 pub type wchar_t = i32;
 pub type nlink_t = u64;
 pub type blksize_t = c_long;
@@ -102,7 +103,7 @@ cfg_if! {
                     .field("uc_stack", &self.uc_stack)
                     .field("uc_mcontext", &self.uc_mcontext)
                     .field("uc_sigmask", &self.uc_sigmask)
-                    // FIXME(debug): .field("__private", &self.__private)
+                    // FIXME: .field("__private", &self.__private)
                     .finish()
             }
         }

@@ -441,12 +441,14 @@ safe_f! {
         let minor = minor as crate::dev_t;
         (major << 8) | minor
     }
+}
 
-    pub {const} fn major(dev: crate::dev_t) -> c_int {
+f! {
+    pub fn major(dev: crate::dev_t) -> c_int {
         ((dev >> 8) & 0xff) as c_int
     }
 
-    pub {const} fn minor(dev: crate::dev_t) -> c_int {
+    pub fn minor(dev: crate::dev_t) -> c_int {
         (dev & 0xffff00ff) as c_int
     }
 }
