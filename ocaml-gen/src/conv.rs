@@ -1,8 +1,10 @@
 //! Implementations of [`crate::OCamlDesc`] for types
 //! that have natural equivalents in OCaml.
+//!
 //! The OCaml description should be the corresponding data types in OCaml
 //! This should correspond to the mapping defined in the ocaml-rs book:
 //! `<https://github.com/zshipko/ocaml-rs/blob/v1.0.0-beta.4/doc/src/02_type_conversion.md>`
+//!
 //! FIXME:
 //! Unsigned types like uint16, uint32 and uint64 are not implemented as OCaml
 //! does not provide types in the Stdlib for it. A custom block should be used.
@@ -10,6 +12,11 @@
 
 use crate::{Env, OCamlDesc};
 use const_random::const_random;
+
+extern crate alloc;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 impl OCamlDesc for () {
     fn ocaml_desc(_env: &Env, _generics: &[&str]) -> String {
@@ -172,7 +179,7 @@ where
     T2: OCamlDesc,
 {
     fn ocaml_desc(env: &Env, generics: &[&str]) -> String {
-        let v = vec![T1::ocaml_desc(env, generics), T2::ocaml_desc(env, generics)];
+        let v = [T1::ocaml_desc(env, generics), T2::ocaml_desc(env, generics)];
         format!("({})", v.join(" * "))
     }
 
@@ -217,7 +224,7 @@ where
     T15: OCamlDesc,
 {
     fn ocaml_desc(env: &Env, generics: &[&str]) -> String {
-        let v = vec![
+        let v = [
             T1::ocaml_desc(env, generics),
             T2::ocaml_desc(env, generics),
             T3::ocaml_desc(env, generics),
@@ -252,7 +259,7 @@ where
     T6: OCamlDesc,
 {
     fn ocaml_desc(env: &Env, generics: &[&str]) -> String {
-        let v = vec![
+        let v = [
             T1::ocaml_desc(env, generics),
             T2::ocaml_desc(env, generics),
             T3::ocaml_desc(env, generics),
@@ -279,7 +286,7 @@ where
     T7: OCamlDesc,
 {
     fn ocaml_desc(env: &Env, generics: &[&str]) -> String {
-        let v = vec![
+        let v = [
             T1::ocaml_desc(env, generics),
             T2::ocaml_desc(env, generics),
             T3::ocaml_desc(env, generics),
@@ -303,7 +310,7 @@ where
     T3: OCamlDesc,
 {
     fn ocaml_desc(env: &Env, generics: &[&str]) -> String {
-        let v = vec![
+        let v = [
             T1::ocaml_desc(env, generics),
             T2::ocaml_desc(env, generics),
             T3::ocaml_desc(env, generics),
