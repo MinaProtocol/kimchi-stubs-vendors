@@ -12,14 +12,24 @@
 [package]
 edition = "2021"
 name = "ocaml-gen"
-version = "0.1.5"
+version = "1.0.0"
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "A library for generating OCaml code"
 readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/o1-labs/ocaml-gen"
-resolver = "1"
+
+[features]
+without-ocamlopt = ["ocaml/without-ocamlopt"]
 
 [lib]
+name = "ocaml_gen"
+path = "src/lib.rs"
 doctest = false
 
 [dependencies.const-random]
@@ -29,10 +39,7 @@ version = "0.1.13"
 version = "0.22.4"
 
 [dependencies.ocaml-gen-derive]
-version = "0.1.5"
+version = "1.0.0"
 
 [dependencies.paste]
 version = "1.0.9"
-
-[features]
-without-ocamlopt = ["ocaml/without-ocamlopt"]
