@@ -4,12 +4,12 @@ use crate::{
     DenseUVPolynomial, EvaluationDomain, Evaluations, GeneralEvaluationDomain, Polynomial,
 };
 use ark_ff::{FftField, Field, Zero};
-use ark_serialize::*;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     fmt,
     ops::{Add, AddAssign, Deref, DerefMut, Div, Mul, Neg, Sub, SubAssign},
     rand::Rng,
-    vec::Vec,
+    vec::*,
 };
 
 #[cfg(feature = "parallel")]
@@ -77,7 +77,7 @@ impl<F: Field> DensePolynomial<F> {
 
         // run Horners method on each thread as follows:
         // 1) Split up the coefficients across each thread evenly.
-        // 2) Do polynomial evaluation via horner's method for the thread's coefficeints
+        // 2) Do polynomial evaluation via horner's method for the thread's coefficients
         // 3) Scale the result point^{thread coefficient start index}
         // Then obtain the final polynomial evaluation by summing each threads result.
         let result = self
@@ -116,13 +116,39 @@ impl<F: Field> DenseUVPolynomial<F> for DensePolynomial<F> {
         &self.coeffs
     }
 
-    /// Outputs a univariate polynomial of degree `d` where
-    /// each coefficient is sampled uniformly at random.
+    /// Outputs a univariate polynomial of degree `d` where each non-leading
+    /// coefficient is sampled uniformly at random from `F` and the leading
+    /// coefficient is sampled uniformly at random from among the non-zero
+    /// elements of `F`.
+    ///
+    /// # Example
+    /// ```
+    /// use ark_std::test_rng;
+    /// use ark_test_curves::bls12_381::Fr;
+    /// use ark_poly::{univariate::DensePolynomial, Polynomial, DenseUVPolynomial};
+    ///
+    /// let rng = &mut test_rng();
+    /// let poly = DensePolynomial::<Fr>::rand(8, rng);
+    /// assert_eq!(poly.degree(), 8);
+    /// ```
     fn rand<R: Rng>(d: usize, rng: &mut R) -> Self {
         let mut random_coeffs = Vec::new();
-        for _ in 0..=d {
-            random_coeffs.push(F::rand(rng));
+
+        if d > 0 {
+            // d - 1 overflows when d = 0
+            for _ in 0..=(d - 1) {
+                random_coeffs.push(F::rand(rng));
+            }
         }
+
+        let mut leading_coefficient = F::rand(rng);
+
+        while leading_coefficient.is_zero() {
+            leading_coefficient = F::rand(rng);
+        }
+
+        random_coeffs.push(leading_coefficient);
+
         Self::from_coefficients_vec(random_coeffs)
     }
 }
@@ -144,12 +170,12 @@ impl<F: FftField> DensePolynomial<F> {
     pub fn divide_by_vanishing_poly<D: EvaluationDomain<F>>(
         &self,
         domain: D,
-    ) -> Option<(DensePolynomial<F>, DensePolynomial<F>)> {
+    ) -> (DensePolynomial<F>, DensePolynomial<F>) {
         let domain_size = domain.size();
 
         if self.coeffs.len() < domain_size {
             // If degree(self) < len(Domain), then the quotient is zero, and the entire polynomial is the remainder
-            Some((DensePolynomial::<F>::zero(), self.clone()))
+            (DensePolynomial::<F>::zero(), self.clone())
         } else {
             // Compute the quotient
             //
@@ -185,7 +211,7 @@ impl<F: FftField> DensePolynomial<F> {
 
             let quotient = DensePolynomial::<F>::from_coefficients_vec(quotient_vec);
             let remainder = DensePolynomial::<F>::from_coefficients_vec(remainder_vec);
-            Some((quotient, remainder))
+            (quotient, remainder)
         }
     }
 }
@@ -256,14 +282,6 @@ impl<F: Field> Deref for DensePolynomial<F> {
 impl<F: Field> DerefMut for DensePolynomial<F> {
     fn deref_mut(&mut self) -> &mut [F] {
         &mut self.coeffs
-    }
-}
-
-impl<F: Field> Add for DensePolynomial<F> {
-    type Output = DensePolynomial<F>;
-
-    fn add(self, other: DensePolynomial<F>) -> Self {
-        &self + &other
     }
 }
 
@@ -353,8 +371,8 @@ impl<'a, F: Field> AddAssign<&'a DensePolynomial<F>> for DensePolynomial<F> {
                 .for_each(|(a, b)| {
                     *a += b;
                 });
-            self.truncate_leading_zeros();
         }
+        self.truncate_leading_zeros();
     }
 }
 
@@ -575,6 +593,15 @@ impl<'b, F: Field> Mul<F> for &'b DensePolynomial<F> {
     }
 }
 
+impl<F: Field> Mul<F> for DensePolynomial<F> {
+    type Output = DensePolynomial<F>;
+
+    #[inline]
+    fn mul(self, elem: F) -> DensePolynomial<F> {
+        &self * elem
+    }
+}
+
 /// Performs O(nlogn) multiplication of polynomials if F is smooth.
 impl<'a, 'b, F: FftField> Mul<&'a DensePolynomial<F>> for &'b DensePolynomial<F> {
     type Output = DensePolynomial<F>;
@@ -584,7 +611,7 @@ impl<'a, 'b, F: FftField> Mul<&'a DensePolynomial<F>> for &'b DensePolynomial<F>
         if self.is_zero() || other.is_zero() {
             DensePolynomial::zero()
         } else {
-            let domain = GeneralEvaluationDomain::new(self.coeffs.len() + other.coeffs.len())
+            let domain = GeneralEvaluationDomain::new(self.coeffs.len() + other.coeffs.len() - 1)
                 .expect("field is not smooth enough to construct domain");
             let mut self_evals = self.evaluate_over_domain_by_ref(domain);
             let other_evals = other.evaluate_over_domain_by_ref(domain);
@@ -592,6 +619,37 @@ impl<'a, 'b, F: FftField> Mul<&'a DensePolynomial<F>> for &'b DensePolynomial<F>
             self_evals.interpolate()
         }
     }
+}
+
+macro_rules! impl_op {
+    ($trait:ident, $method:ident, $field_bound:ident) => {
+        impl<F: $field_bound> $trait<DensePolynomial<F>> for DensePolynomial<F> {
+            type Output = DensePolynomial<F>;
+
+            #[inline]
+            fn $method(self, other: DensePolynomial<F>) -> DensePolynomial<F> {
+                (&self).$method(&other)
+            }
+        }
+
+        impl<'a, F: $field_bound> $trait<&'a DensePolynomial<F>> for DensePolynomial<F> {
+            type Output = DensePolynomial<F>;
+
+            #[inline]
+            fn $method(self, other: &'a DensePolynomial<F>) -> DensePolynomial<F> {
+                (&self).$method(other)
+            }
+        }
+
+        impl<'a, F: $field_bound> $trait<DensePolynomial<F>> for &'a DensePolynomial<F> {
+            type Output = DensePolynomial<F>;
+
+            #[inline]
+            fn $method(self, other: DensePolynomial<F>) -> DensePolynomial<F> {
+                self.$method(&other)
+            }
+        }
+    };
 }
 
 impl<F: Field> Zero for DensePolynomial<F> {
@@ -606,11 +664,17 @@ impl<F: Field> Zero for DensePolynomial<F> {
     }
 }
 
+impl_op!(Add, add, Field);
+impl_op!(Sub, sub, Field);
+impl_op!(Mul, mul, FftField);
+impl_op!(Div, div, Field);
+
 #[cfg(test)]
 mod tests {
-    use crate::{polynomial::univariate::*, EvaluationDomain, GeneralEvaluationDomain, Polynomial};
-    use ark_ff::{Field, One, UniformRand, Zero};
-    use ark_std::{rand::Rng, test_rng, vec::Vec};
+    use crate::{polynomial::univariate::*, GeneralEvaluationDomain};
+    use ark_ff::{Fp64, MontBackend, MontConfig};
+    use ark_ff::{One, UniformRand};
+    use ark_std::{rand::Rng, test_rng};
     use ark_test_curves::bls12_381::Fr;
 
     fn rand_sparse_poly<R: Rng>(degree: usize, rng: &mut R) -> SparsePolynomial<Fr> {
@@ -622,6 +686,23 @@ mod tests {
             }
         }
         SparsePolynomial::from_coefficients_vec(coeffs)
+    }
+
+    #[test]
+    fn rand_dense_poly_degree() {
+        #[derive(MontConfig)]
+        #[modulus = "5"]
+        #[generator = "2"]
+        pub struct F5Config;
+
+        let rng = &mut test_rng();
+        pub type F5 = Fp64<MontBackend<F5Config, 1>>;
+
+        // if the leading coefficient were uniformly sampled from all of F, this
+        // test would fail with high probability ~99.9%
+        for i in 1..=30 {
+            assert_eq!(DensePolynomial::<F5>::rand(i, rng).degree(), i);
+        }
     }
 
     #[test]
@@ -855,7 +936,7 @@ mod tests {
             let domain = GeneralEvaluationDomain::new(1 << size).unwrap();
             for degree in 0..12 {
                 let p = DensePolynomial::<Fr>::rand(degree * 100, rng);
-                let (quotient, remainder) = p.divide_by_vanishing_poly(domain).unwrap();
+                let (quotient, remainder) = p.divide_by_vanishing_poly(domain);
                 let p_recovered = quotient.mul_by_vanishing_poly(domain) + remainder;
                 assert_eq!(p, p_recovered);
             }
@@ -894,13 +975,20 @@ mod tests {
     fn evaluate_over_domain_test() {
         let rng = &mut ark_std::test_rng();
         let domain = crate::domain::Radix2EvaluationDomain::<Fr>::new(1 << 10).unwrap();
+        let offset = Fr::GENERATOR;
+        let coset = domain.get_coset(offset).unwrap();
         for _ in 0..100 {
             let poly = DensePolynomial::<Fr>::rand(1 << 11, rng);
             let evaluations = domain
                 .elements()
                 .map(|e| poly.evaluate(&e))
                 .collect::<Vec<_>>();
-            assert_eq!(evaluations, poly.evaluate_over_domain(domain).evals);
+            assert_eq!(evaluations, poly.evaluate_over_domain_by_ref(domain).evals);
+            let evaluations = coset
+                .elements()
+                .map(|e| poly.evaluate(&e))
+                .collect::<Vec<_>>();
+            assert_eq!(evaluations, poly.evaluate_over_domain(coset).evals);
         }
         let zero = DensePolynomial::zero();
         let evaluations = domain
@@ -908,5 +996,38 @@ mod tests {
             .map(|e| zero.evaluate(&e))
             .collect::<Vec<_>>();
         assert_eq!(evaluations, zero.evaluate_over_domain(domain).evals);
+    }
+
+    use crate::Radix2EvaluationDomain;
+
+    #[test]
+    fn evaluate_over_domain_regression_test() {
+        // See https://github.com/arkworks-rs/algebra/issues/745
+        #[derive(MontConfig)]
+        #[modulus = "18446744069414584321"]
+        #[generator = "7"]
+        struct FrConfig64;
+        type F = Fp64<MontBackend<FrConfig64, 1>>;
+
+        let degree = 17;
+        let eval_domain_size = 16;
+
+        let poly = DensePolynomial::from_coefficients_vec(vec![F::ONE; degree]);
+        let domain = Radix2EvaluationDomain::new(eval_domain_size).unwrap();
+
+        // Now we get a coset
+        let offset = F::from(42u64);
+        let domain = domain.get_coset(offset).unwrap();
+
+        // This is the query points of the domain
+        let query_points: Vec<_> = domain.elements().collect();
+
+        let eval1 = poly.evaluate_over_domain_by_ref(domain).evals;
+        let eval2 = query_points
+            .iter()
+            .map(|x| poly.evaluate(x))
+            .collect::<Vec<_>>();
+
+        assert_eq!(eval1, eval2);
     }
 }

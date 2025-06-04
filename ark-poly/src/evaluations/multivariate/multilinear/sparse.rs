@@ -2,7 +2,7 @@
 
 use crate::{
     evaluations::multivariate::multilinear::swap_bits, DenseMultilinearExtension,
-    MultilinearExtension,
+    MultilinearExtension, Polynomial,
 };
 use ark_ff::{Field, Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -10,15 +10,16 @@ use ark_std::{
     collections::BTreeMap,
     fmt,
     fmt::{Debug, Formatter},
-    iter::FromIterator,
     ops::{Add, AddAssign, Index, Neg, Sub, SubAssign},
     rand::Rng,
-    vec::Vec,
+    vec::*,
     UniformRand,
 };
 use hashbrown::HashMap;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+
+use super::DefaultHasher;
 
 /// Stores a multilinear polynomial in sparse evaluation form.
 #[derive(Clone, PartialEq, Eq, Hash, Default, CanonicalSerialize, CanonicalDeserialize)]
@@ -67,7 +68,8 @@ impl<F: Field> SparseMultilinearExtension<F> {
     ) -> Self {
         assert!(num_nonzero_entries <= (1 << num_vars));
 
-        let mut map = HashMap::new();
+        let mut map =
+            HashMap::with_hasher(core::hash::BuildHasherDefault::<DefaultHasher>::default());
         for _ in 0..num_nonzero_entries {
             let mut index = usize::rand(rng) & ((1 << num_vars) - 1);
             while map.get(&index).is_some() {
@@ -120,14 +122,6 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
         self.num_vars
     }
 
-    fn evaluate(&self, point: &[F]) -> Option<F> {
-        if point.len() == self.num_vars {
-            Some(self.fix_variables(point)[0])
-        } else {
-            None
-        }
-    }
-
     /// Outputs an `l`-variate multilinear extension where value of evaluations
     /// are sampled uniformly at random. The number of nonzero entries is
     /// `sqrt(2^num_vars)` and indices of those nonzero entries are distributed
@@ -164,13 +158,16 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
         let dim = partial_point.len();
         assert!(dim <= self.num_vars, "invalid partial point dimension");
 
-        let window = ark_std::log2(self.evaluations.len()) as usize;
+        let mut window = ark_std::log2(self.evaluations.len()) as usize;
+        if window == 0 {
+            window = 1;
+        }
         let mut point = partial_point;
         let mut last = treemap_to_hashmap(&self.evaluations);
 
         // batch evaluation
         while !point.is_empty() {
-            let focus_length = if window > 0 && point.len() > window {
+            let focus_length = if point.len() > window {
                 window
             } else {
                 point.len()
@@ -179,7 +176,8 @@ impl<F: Field> MultilinearExtension<F> for SparseMultilinearExtension<F> {
             point = &point[focus_length..];
             let pre = precompute_eq(focus);
             let dim = focus.len();
-            let mut result = HashMap::new();
+            let mut result =
+                HashMap::with_hasher(core::hash::BuildHasherDefault::<DefaultHasher>::default());
             for src_entry in last.iter() {
                 let old_idx = *src_entry.0;
                 let gz = pre[old_idx & ((1 << dim) - 1)];
@@ -227,6 +225,19 @@ impl<F: Field> Index<usize> for SparseMultilinearExtension<F> {
     }
 }
 
+impl<F: Field> Polynomial<F> for SparseMultilinearExtension<F> {
+    type Point = Vec<F>;
+
+    fn degree(&self) -> usize {
+        self.num_vars
+    }
+
+    fn evaluate(&self, point: &Self::Point) -> F {
+        assert!(point.len() == self.num_vars);
+        self.fix_variables(point)[0]
+    }
+}
+
 impl<F: Field> Add for SparseMultilinearExtension<F> {
     type Output = SparseMultilinearExtension<F>;
 
@@ -254,7 +265,8 @@ impl<'a, 'b, F: Field> Add<&'a SparseMultilinearExtension<F>>
             "trying to add non-zero polynomial with different number of variables"
         );
         // simply merge the evaluations
-        let mut evaluations = HashMap::new();
+        let mut evaluations =
+            HashMap::with_hasher(core::hash::BuildHasherDefault::<DefaultHasher>::default());
         for (&i, &v) in self.evaluations.iter().chain(rhs.evaluations.iter()) {
             *(evaluations.entry(i).or_insert(F::zero())) += v;
         }
@@ -388,22 +400,25 @@ fn tuples_to_treemap<F: Field>(tuples: &[(usize, F)]) -> BTreeMap<usize, F> {
     BTreeMap::from_iter(tuples.iter().map(|(i, v)| (*i, *v)))
 }
 
-fn treemap_to_hashmap<F: Field>(map: &BTreeMap<usize, F>) -> HashMap<usize, F> {
+fn treemap_to_hashmap<F: Field>(
+    map: &BTreeMap<usize, F>,
+) -> HashMap<usize, F, core::hash::BuildHasherDefault<DefaultHasher>> {
     HashMap::from_iter(map.iter().map(|(i, v)| (*i, *v)))
 }
 
-fn hashmap_to_treemap<F: Field>(map: &HashMap<usize, F>) -> BTreeMap<usize, F> {
+fn hashmap_to_treemap<F: Field, S>(map: &HashMap<usize, F, S>) -> BTreeMap<usize, F> {
     BTreeMap::from_iter(map.iter().map(|(i, v)| (*i, *v)))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        evaluations::multivariate::multilinear::MultilinearExtension, SparseMultilinearExtension,
+        evaluations::multivariate::multilinear::MultilinearExtension, Polynomial,
+        SparseMultilinearExtension,
     };
     use ark_ff::{One, Zero};
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-    use ark_std::{ops::Neg, test_rng, vec::Vec, UniformRand};
+    use ark_std::{ops::Neg, test_rng, vec::*, UniformRand};
     use ark_test_curves::bls12_381::Fr;
     /// Some sanity test to ensure random sparse polynomial make sense.
     #[test]
@@ -453,7 +468,7 @@ mod tests {
         let mut rng = test_rng();
         let ev1 = Fr::rand(&mut rng);
         let poly1 = SparseMultilinearExtension::from_evaluations(0, &vec![(0, ev1)]);
-        assert_eq!(poly1.evaluate(&[]).unwrap(), ev1);
+        assert_eq!(poly1.evaluate(&[].into()), ev1);
 
         // test single-variate polynomial
         let ev2 = vec![Fr::rand(&mut rng), Fr::rand(&mut rng)];
@@ -462,7 +477,7 @@ mod tests {
 
         let x = Fr::rand(&mut rng);
         assert_eq!(
-            poly2.evaluate(&[x]).unwrap(),
+            poly2.evaluate(&[x].into()),
             x * ev2[1] + (Fr::one() - x) * ev2[0]
         );
 
@@ -471,7 +486,7 @@ mod tests {
         let poly2 = SparseMultilinearExtension::from_evaluations(1, &vec![(1, ev3)]);
 
         let x = Fr::rand(&mut rng);
-        assert_eq!(poly2.evaluate(&[x]).unwrap(), x * ev3);
+        assert_eq!(poly2.evaluate(&[x].into()), x * ev3);
     }
 
     #[test]
@@ -500,32 +515,32 @@ mod tests {
             let point: Vec<_> = (0..NV).map(|_| Fr::rand(&mut rng)).collect();
             let poly1 = SparseMultilinearExtension::rand(NV, &mut rng);
             let poly2 = SparseMultilinearExtension::rand(NV, &mut rng);
-            let v1 = poly1.evaluate(&point).unwrap();
-            let v2 = poly2.evaluate(&point).unwrap();
+            let v1 = poly1.evaluate(&point);
+            let v2 = poly2.evaluate(&point);
             // test add
-            assert_eq!((&poly1 + &poly2).evaluate(&point).unwrap(), v1 + v2);
+            assert_eq!((&poly1 + &poly2).evaluate(&point), v1 + v2);
             // test sub
-            assert_eq!((&poly1 - &poly2).evaluate(&point).unwrap(), v1 - v2);
+            assert_eq!((&poly1 - &poly2).evaluate(&point), v1 - v2);
             // test negate
-            assert_eq!(poly1.clone().neg().evaluate(&point).unwrap(), -v1);
+            assert_eq!(poly1.clone().neg().evaluate(&point), -v1);
             // test add assign
             {
                 let mut poly1 = poly1.clone();
                 poly1 += &poly2;
-                assert_eq!(poly1.evaluate(&point).unwrap(), v1 + v2)
+                assert_eq!(poly1.evaluate(&point), v1 + v2)
             }
             // test sub assign
             {
                 let mut poly1 = poly1.clone();
                 poly1 -= &poly2;
-                assert_eq!(poly1.evaluate(&point).unwrap(), v1 - v2)
+                assert_eq!(poly1.evaluate(&point), v1 - v2)
             }
             // test add assign with scalar
             {
                 let mut poly1 = poly1.clone();
                 let scalar = Fr::rand(&mut rng);
                 poly1 += (scalar, &poly2);
-                assert_eq!(poly1.evaluate(&point).unwrap(), v1 + scalar * v2)
+                assert_eq!(poly1.evaluate(&point), v1 + scalar * v2)
             }
             // test additive identity
             {
@@ -538,7 +553,7 @@ mod tests {
                     let mut zero = SparseMultilinearExtension::zero();
                     let scalar = Fr::rand(&mut rng);
                     zero += (scalar, &poly1);
-                    assert_eq!(zero.evaluate(&point).unwrap(), scalar * v1);
+                    assert_eq!(zero.evaluate(&point), scalar * v1);
                 }
             }
         }
@@ -551,29 +566,29 @@ mod tests {
             let mut poly = SparseMultilinearExtension::rand(10, &mut rng);
             let mut point: Vec<_> = (0..10).map(|_| Fr::rand(&mut rng)).collect();
 
-            let expected = poly.evaluate(&point).unwrap();
+            let expected = poly.evaluate(&point);
 
             poly = poly.relabel(2, 2, 1); // should have no effect
-            assert_eq!(expected, poly.evaluate(&point).unwrap());
+            assert_eq!(expected, poly.evaluate(&point));
 
             poly = poly.relabel(3, 4, 1); // should switch 3 and 4
             point.swap(3, 4);
-            assert_eq!(expected, poly.evaluate(&point).unwrap());
+            assert_eq!(expected, poly.evaluate(&point));
 
             poly = poly.relabel(7, 5, 1);
             point.swap(7, 5);
-            assert_eq!(expected, poly.evaluate(&point).unwrap());
+            assert_eq!(expected, poly.evaluate(&point));
 
             poly = poly.relabel(2, 5, 3);
             point.swap(2, 5);
             point.swap(3, 6);
             point.swap(4, 7);
-            assert_eq!(expected, poly.evaluate(&point).unwrap());
+            assert_eq!(expected, poly.evaluate(&point));
 
             poly = poly.relabel(7, 0, 2);
             point.swap(0, 7);
             point.swap(1, 8);
-            assert_eq!(expected, poly.evaluate(&point).unwrap());
+            assert_eq!(expected, poly.evaluate(&point));
         }
     }
 

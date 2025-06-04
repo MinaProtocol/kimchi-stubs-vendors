@@ -11,20 +11,27 @@
 
 [package]
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.75"
 name = "ark-serialize-derive"
-version = "0.4.2"
-authors = ["arkworks Contributors"]
+version = "0.5.0"
+authors = ["arkworks contributors"]
+build = false
 include = [
     "Cargo.toml",
     "src",
     "README.md",
     "LICENSE-APACHE",
     "LICENSE-MIT",
+    "doc/katex-header.html",
 ]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "A library for deriving serialization traits for the arkworks ecosystem"
 homepage = "https://arkworks.rs"
-documentation = "https://docs.rs/algebra/"
+documentation = "https://docs.rs/ark-serialize-derive/"
+readme = false
 keywords = [
     "cryptography",
     "finite-fields",
@@ -32,11 +39,15 @@ keywords = [
     "serialization",
 ]
 categories = ["cryptography"]
-license = "MIT/Apache-2.0"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/arkworks-rs/algebra"
-resolver = "1"
+
+[package.metadata.docs.rs]
+workspace = true
 
 [lib]
+name = "ark_serialize_derive"
+path = "src/lib.rs"
 proc-macro = true
 
 [dependencies.proc-macro2]
@@ -46,4 +57,4 @@ version = "1.0"
 version = "1.0"
 
 [dependencies.syn]
-version = "1.0"
+version = "2.0"
