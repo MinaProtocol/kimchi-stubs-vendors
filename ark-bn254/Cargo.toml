@@ -12,8 +12,9 @@
 [package]
 edition = "2021"
 name = "ark-bn254"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["arkworks contributors"]
+build = false
 include = [
     "Cargo.toml",
     "src",
@@ -21,53 +22,68 @@ include = [
     "LICENSE-APACHE",
     "LICENSE-MIT",
 ]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "The BN254 pairing-friendly elliptic curve"
 homepage = "https://arkworks.rs"
 documentation = "https://docs.rs/ark-bn254/"
+readme = false
 keywords = [
     "cryptography",
     "finite-fields",
     "elliptic-curves",
 ]
 categories = ["cryptography"]
-license = "MIT/Apache-2.0"
-repository = "https://github.com/arkworks-rs/curves"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/arkworks-rs/algebra"
 
-[[bench]]
-name = "bn254"
-path = "benches/bn254.rs"
-harness = false
+[lib]
+name = "ark_bn254"
+path = "src/lib.rs"
 
 [dependencies.ark-ec]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
 [dependencies.ark-ff]
-version = "0.4.0"
+version = "0.5.0"
+default-features = false
+
+[dependencies.ark-r1cs-std]
+version = "0.5.0"
+optional = true
 default-features = false
 
 [dependencies.ark-std]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
 [dev-dependencies.ark-algebra-bench-templates]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
 [dev-dependencies.ark-algebra-test-templates]
-version = "0.4.0"
+version = "0.5.0"
+default-features = false
+
+[dev-dependencies.ark-relations]
+version = "0.5.0"
 default-features = false
 
 [dev-dependencies.ark-serialize]
-version = "0.4.0"
+version = "0.5.0"
 default-features = false
 
 [features]
 curve = ["scalar_field"]
 default = ["curve"]
+r1cs = ["ark-r1cs-std"]
 scalar_field = []
 std = [
     "ark-std/std",
     "ark-ff/std",
     "ark-ec/std",
+    "ark-r1cs-std?/std",
 ]

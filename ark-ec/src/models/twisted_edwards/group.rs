@@ -11,12 +11,13 @@ use ark_std::{
         distributions::{Distribution, Standard},
         Rng,
     },
-    vec::Vec,
+    vec::*,
     One, Zero,
 };
 
-use ark_ff::{fields::Field, PrimeField, ToConstraintField, UniformRand};
+use ark_ff::{fields::Field, AdditiveGroup, PrimeField, ToConstraintField, UniformRand};
 
+use educe::Educe;
 use zeroize::Zeroize;
 
 #[cfg(feature = "parallel")]
@@ -25,7 +26,7 @@ use rayon::prelude::*;
 use super::{Affine, MontCurveConfig, TECurveConfig};
 use crate::{
     scalar_mul::{variable_base::VariableBaseMSM, ScalarMul},
-    AffineRepr, CurveGroup, Group,
+    AffineRepr, CurveGroup, PrimeGroup,
 };
 
 /// `Projective` implements Extended Twisted Edwards Coordinates
@@ -33,13 +34,8 @@ use crate::{
 ///
 /// This implementation uses the unified addition formulae from that paper (see
 /// Section 3.1).
-#[derive(Derivative)]
-#[derivative(
-    Copy(bound = "P: TECurveConfig"),
-    Clone(bound = "P: TECurveConfig"),
-    Eq(bound = "P: TECurveConfig"),
-    Debug(bound = "P: TECurveConfig")
-)]
+#[derive(Educe)]
+#[educe(Copy, Clone, Eq(bound(P: TECurveConfig)), Debug)]
 #[must_use]
 pub struct Projective<P: TECurveConfig> {
     pub x: P::BaseField,
@@ -150,12 +146,15 @@ impl<P: TECurveConfig> Zero for Projective<P> {
     }
 }
 
-impl<P: TECurveConfig> Group for Projective<P> {
-    type ScalarField = P::ScalarField;
+impl<P: TECurveConfig> AdditiveGroup for Projective<P> {
+    type Scalar = P::ScalarField;
 
-    fn generator() -> Self {
-        Affine::generator().into()
-    }
+    const ZERO: Self = Self::new_unchecked(
+        P::BaseField::ZERO,
+        P::BaseField::ONE,
+        P::BaseField::ZERO,
+        P::BaseField::ONE,
+    );
 
     fn double_in_place(&mut self) -> &mut Self {
         // See "Twisted Edwards Curves Revisited"
@@ -189,6 +188,14 @@ impl<P: TECurveConfig> Group for Projective<P> {
         self.z = f * &g;
 
         self
+    }
+}
+
+impl<P: TECurveConfig> PrimeGroup for Projective<P> {
+    type ScalarField = P::ScalarField;
+
+    fn generator() -> Self {
+        Affine::generator().into()
     }
 
     #[inline]
@@ -396,15 +403,8 @@ impl<P: TECurveConfig> From<Affine<P>> for Projective<P> {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(
-    Copy(bound = "P: MontCurveConfig"),
-    Clone(bound = "P: MontCurveConfig"),
-    PartialEq(bound = "P: MontCurveConfig"),
-    Eq(bound = "P: MontCurveConfig"),
-    Debug(bound = "P: MontCurveConfig"),
-    Hash(bound = "P: MontCurveConfig")
-)]
+#[derive(Educe)]
+#[educe(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct MontgomeryAffine<P: MontCurveConfig> {
     pub x: P::BaseField,
     pub y: P::BaseField,
