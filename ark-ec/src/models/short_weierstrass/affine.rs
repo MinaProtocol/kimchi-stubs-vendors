@@ -10,12 +10,13 @@ use ark_std::{
         distributions::{Distribution, Standard},
         Rng,
     },
-    vec::Vec,
+    vec::*,
     One, Zero,
 };
 
-use ark_ff::{fields::Field, PrimeField, ToConstraintField, UniformRand};
+use ark_ff::{fields::Field, AdditiveGroup, PrimeField, ToConstraintField, UniformRand};
 
+use educe::Educe;
 use zeroize::Zeroize;
 
 use super::{Projective, SWCurveConfig, SWFlags};
@@ -23,14 +24,8 @@ use crate::AffineRepr;
 
 /// Affine coordinates for a point on an elliptic curve in short Weierstrass
 /// form, over the base field `P::BaseField`.
-#[derive(Derivative)]
-#[derivative(
-    Copy(bound = "P: SWCurveConfig"),
-    Clone(bound = "P: SWCurveConfig"),
-    PartialEq(bound = "P: SWCurveConfig"),
-    Eq(bound = "P: SWCurveConfig"),
-    Hash(bound = "P: SWCurveConfig")
-)]
+#[derive(Educe)]
+#[educe(Copy, Clone, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct Affine<P: SWCurveConfig> {
     #[doc(hidden)]
@@ -205,8 +200,8 @@ impl<P: SWCurveConfig> AffineRepr for Affine<P> {
     type ScalarField = P::ScalarField;
     type Group = Projective<P>;
 
-    fn xy(&self) -> Option<(&Self::BaseField, &Self::BaseField)> {
-        (!self.infinity).then(|| (&self.x, &self.y))
+    fn xy(&self) -> Option<(Self::BaseField, Self::BaseField)> {
+        (!self.infinity).then(|| (self.x, self.y))
     }
 
     #[inline]
@@ -298,6 +293,20 @@ impl<P: SWCurveConfig, T: Borrow<Self>> Sub<T> for Affine<P> {
         let mut copy = self.into_group();
         copy -= other.borrow();
         copy
+    }
+}
+
+impl<P: SWCurveConfig> Sub<Projective<P>> for Affine<P> {
+    type Output = Projective<P>;
+    fn sub(self, other: Projective<P>) -> Projective<P> {
+        self + (-other)
+    }
+}
+
+impl<'a, P: SWCurveConfig> Sub<&'a Projective<P>> for Affine<P> {
+    type Output = Projective<P>;
+    fn sub(self, other: &'a Projective<P>) -> Projective<P> {
+        self + (-*other)
     }
 }
 

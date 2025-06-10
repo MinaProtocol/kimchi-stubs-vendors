@@ -11,7 +11,8 @@ use ark_ff::{
     },
     CyclotomicMultSubgroup,
 };
-use ark_std::{marker::PhantomData, vec::Vec};
+use ark_std::{cfg_chunks_mut, marker::PhantomData, vec::*};
+use educe::Educe;
 use itertools::Itertools;
 use num_traits::One;
 
@@ -174,8 +175,8 @@ pub use self::{
     g2::{G2Affine, G2Prepared, G2Projective},
 };
 
-#[derive(Derivative)]
-#[derivative(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Educe)]
+#[educe(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Bn<P: BnConfig>(PhantomData<fn() -> P>);
 
 impl<P: BnConfig> Bn<P> {

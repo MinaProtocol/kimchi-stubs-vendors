@@ -4,10 +4,14 @@ use ark_serialize::{
 };
 use ark_std::io::{Read, Write};
 
-use ark_ff::fields::Field;
+use ark_ff::{fields::Field, AdditiveGroup};
 
-use crate::{scalar_mul::variable_base::VariableBaseMSM, AffineRepr, Group};
-
+use crate::{
+    scalar_mul::{
+        sw_double_and_add_affine, sw_double_and_add_projective, variable_base::VariableBaseMSM,
+    },
+    AffineRepr,
+};
 use num_traits::Zero;
 
 mod affine;
@@ -61,13 +65,18 @@ pub trait SWCurveConfig: super::CurveConfig {
     /// Check if the provided curve point is in the prime-order subgroup.
     ///
     /// The default implementation multiplies `item` by the order `r` of the
-    /// prime-order subgroup, and checks if the result is one.
+    /// prime-order subgroup, and checks if the result is zero. If the
+    /// curve's cofactor is one, this check automatically returns true.
     /// Implementors can choose to override this default impl
     /// if the given curve has faster methods
     /// for performing this check (for example, via leveraging curve
     /// isomorphisms).
     fn is_in_correct_subgroup_assuming_on_curve(item: &Affine<Self>) -> bool {
-        Self::mul_affine(item, Self::ScalarField::characteristic()).is_zero()
+        if Self::cofactor_is_one() {
+            true
+        } else {
+            Self::mul_affine(item, Self::ScalarField::characteristic()).is_zero()
+        }
     }
 
     /// Performs cofactor clearing.
@@ -80,29 +89,13 @@ pub trait SWCurveConfig: super::CurveConfig {
     /// Default implementation of group multiplication for projective
     /// coordinates
     fn mul_projective(base: &Projective<Self>, scalar: &[u64]) -> Projective<Self> {
-        let mut res = Projective::<Self>::zero();
-        for b in ark_ff::BitIteratorBE::without_leading_zeros(scalar) {
-            res.double_in_place();
-            if b {
-                res += base;
-            }
-        }
-
-        res
+        sw_double_and_add_projective(base, scalar)
     }
 
     /// Default implementation of group multiplication for affine
     /// coordinates.
     fn mul_affine(base: &Affine<Self>, scalar: &[u64]) -> Projective<Self> {
-        let mut res = Projective::<Self>::zero();
-        for b in ark_ff::BitIteratorBE::without_leading_zeros(scalar) {
-            res.double_in_place();
-            if b {
-                res += base
-            }
-        }
-
-        res
+        sw_double_and_add_affine(base, scalar)
     }
 
     /// Default implementation for multi scalar multiplication

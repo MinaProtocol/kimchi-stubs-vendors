@@ -10,18 +10,18 @@ use ark_std::{
     fmt,
     ops::{Add, AddAssign, Neg, Sub, SubAssign},
     rand::Rng,
-    vec::Vec,
+    vec::*,
 };
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 /// Stores a sparse multivariate polynomial in coefficient form.
-#[derive(Derivative, CanonicalSerialize, CanonicalDeserialize)]
-#[derivative(Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Educe, CanonicalSerialize, CanonicalDeserialize)]
+#[educe(Clone, PartialEq, Eq, Hash, Default)]
 pub struct SparsePolynomial<F: Field, T: Term> {
     /// The number of variables the polynomial supports
-    #[derivative(PartialEq = "ignore")]
+    #[educe(PartialEq(ignore))]
     pub num_vars: usize,
     /// List of each term along with its coefficient
     pub terms: Vec<(F, T)>,
@@ -293,7 +293,7 @@ impl<F: Field, T: Term> Zero for SparsePolynomial<F, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_ff::{Field, UniformRand, Zero};
+    use ark_ff::UniformRand;
     use ark_std::test_rng;
     use ark_test_curves::bls12_381::Fr;
 

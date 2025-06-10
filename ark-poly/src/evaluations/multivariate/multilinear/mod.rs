@@ -8,13 +8,33 @@ use ark_std::{
     fmt::Debug,
     hash::Hash,
     ops::{Add, AddAssign, Index, Neg, SubAssign},
-    vec::Vec,
+    vec::*,
 };
 
 use ark_ff::{Field, Zero};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::rand::Rng;
+
+use crate::Polynomial;
+
+#[cfg(all(
+    target_has_atomic = "8",
+    target_has_atomic = "16",
+    target_has_atomic = "32",
+    target_has_atomic = "64",
+    target_has_atomic = "ptr"
+))]
+type DefaultHasher = ahash::AHasher;
+
+#[cfg(not(all(
+    target_has_atomic = "8",
+    target_has_atomic = "16",
+    target_has_atomic = "32",
+    target_has_atomic = "64",
+    target_has_atomic = "ptr"
+)))]
+type DefaultHasher = fnv::FnvHasher;
 
 /// This trait describes an interface for the multilinear extension
 /// of an array.
@@ -39,13 +59,10 @@ pub trait MultilinearExtension<F: Field>:
     + for<'a> AddAssign<(F, &'a Self)>
     + for<'a> SubAssign<&'a Self>
     + Index<usize>
+    + Polynomial<F, Point = Vec<F>>
 {
     /// Returns the number of variables in `self`
     fn num_vars(&self) -> usize;
-
-    /// Evaluates `self` at the given the vector `point` in slice.
-    /// If the number of variables does not match, return `None`.
-    fn evaluate(&self, point: &[F]) -> Option<F>;
 
     /// Outputs an `l`-variate multilinear extension where value of evaluations
     /// are sampled uniformly at random.
@@ -64,7 +81,7 @@ pub trait MultilinearExtension<F: Field>:
     fn fix_variables(&self, partial_point: &[F]) -> Self;
 
     /// Returns a list of evaluations over the domain, which is the boolean
-    /// hypercube.
+    /// hypercube. The evaluations are in little-endian order.
     fn to_evaluations(&self) -> Vec<F>;
 }
 
