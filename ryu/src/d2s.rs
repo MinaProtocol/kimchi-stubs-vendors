@@ -18,14 +18,12 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 // KIND, either express or implied.
 
-use crate::common::{log10_pow2, log10_pow5, pow5bits};
+use crate::common::*;
 #[cfg(not(feature = "small"))]
-pub use crate::d2s_full_table::{DOUBLE_POW5_INV_SPLIT, DOUBLE_POW5_SPLIT};
-use crate::d2s_intrinsics::{
-    div10, div100, div5, mul_shift_all_64, multiple_of_power_of_2, multiple_of_power_of_5,
-};
+pub use crate::d2s_full_table::*;
+use crate::d2s_intrinsics::*;
 #[cfg(feature = "small")]
-pub use crate::d2s_small_table::{compute_inv_pow5, compute_pow5};
+pub use crate::d2s_small_table::*;
 use core::mem::MaybeUninit;
 
 pub const DOUBLE_MANTISSA_BITS: u32 = 52;

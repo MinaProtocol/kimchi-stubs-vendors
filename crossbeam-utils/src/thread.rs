@@ -111,16 +111,13 @@
 //! }).unwrap();
 //! ```
 
-use std::boxed::Box;
 use std::fmt;
 use std::io;
 use std::marker::PhantomData;
 use std::mem;
 use std::panic;
-use std::string::String;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::vec::Vec;
 
 use crate::sync::WaitGroup;
 
@@ -500,7 +497,7 @@ pub struct ScopedJoinHandle<'scope, T> {
     /// Holds the result of the inner closure.
     result: SharedOption<T>,
 
-    /// A handle to the spawned thread.
+    /// A handle to the the spawned thread.
     thread: thread::Thread,
 
     /// Borrows the parent scope with lifetime `'scope`.

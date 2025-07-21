@@ -320,13 +320,13 @@ impl OffsetDateTime {
 
         (
             year,
-            ordinal as u16,
+            ordinal as _,
             // Safety: The cascades above ensure the values are in range.
             unsafe {
                 Time::__from_hms_nanos_unchecked(
-                    hour as u8,
-                    minute as u8,
-                    second as u8,
+                    hour as _,
+                    minute as _,
+                    second as _,
                     self.nanosecond(),
                 )
             },
@@ -381,13 +381,13 @@ impl OffsetDateTime {
             )
         };
 
-        let seconds_within_day = timestamp.rem_euclid(Second::per(Day) as i64);
+        let seconds_within_day = timestamp.rem_euclid(Second::per(Day) as _);
         // Safety: All values are in range.
         let time = unsafe {
             Time::__from_hms_nanos_unchecked(
-                (seconds_within_day / Second::per(Hour) as i64) as u8,
-                ((seconds_within_day % Second::per(Hour) as i64) / Minute::per(Hour) as i64) as u8,
-                (seconds_within_day % Second::per(Minute) as i64) as u8,
+                (seconds_within_day / Second::per(Hour) as i64) as _,
+                ((seconds_within_day % Second::per(Hour) as i64) / Minute::per(Hour) as i64) as _,
+                (seconds_within_day % Second::per(Minute) as i64) as _,
                 0,
             )
         };
@@ -424,7 +424,7 @@ impl OffsetDateTime {
                     datetime.hour(),
                     datetime.minute(),
                     datetime.second(),
-                    timestamp.rem_euclid(Nanosecond::per(Second) as i128) as u32,
+                    timestamp.rem_euclid(Nanosecond::per(Second) as _) as u32,
                 )
             },
             UtcOffset::UTC,

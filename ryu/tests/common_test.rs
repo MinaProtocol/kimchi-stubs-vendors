@@ -31,7 +31,7 @@
 #[path = "../src/common.rs"]
 mod common;
 
-use common::{ceil_log2_pow5, decimal_length9, log10_pow2, log10_pow5};
+use common::*;
 
 #[test]
 fn test_decimal_length9() {

@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.67.1"
 name = "time-macros"
-version = "0.2.22"
+version = "0.2.21"
 authors = [
     "Jacob Pratt <open-source@jhpratt.dev>",
     "Time contributors",
@@ -61,7 +61,6 @@ version = "=0.1.4"
 
 [lints.clippy]
 alloc-instead-of-core = "deny"
-as-underscore = "warn"
 dbg-macro = "warn"
 decimal-literal-representation = "warn"
 explicit-auto-deref = "warn"

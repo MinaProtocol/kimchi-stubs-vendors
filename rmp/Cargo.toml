@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "rmp"
-version = "0.8.14"
+version = "0.8.12"
 authors = ["Evgeny Safronov <division494@gmail.com>"]
 description = "Pure Rust MessagePack serialization implementation"
 documentation = "https://docs.rs/rmp"
@@ -24,9 +24,7 @@ keywords = [
 categories = ["encoding"]
 license = "MIT"
 repository = "https://github.com/3Hren/msgpack-rust"
-
-[package.metadata.release]
-tag-prefix = "{{crate_name}}/"
+resolver = "1"
 
 [dependencies.byteorder]
 version = "1.4.2"

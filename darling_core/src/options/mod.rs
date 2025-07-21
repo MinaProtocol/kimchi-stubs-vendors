@@ -7,7 +7,6 @@ use crate::{Error, FromMeta, Result};
 
 mod core;
 mod forward_attrs;
-mod forwarded_field;
 mod from_attributes;
 mod from_derive;
 mod from_field;
@@ -20,8 +19,7 @@ mod outer_from;
 mod shape;
 
 pub use self::core::Core;
-pub use self::forward_attrs::ForwardAttrsFilter;
-pub use self::forwarded_field::ForwardedField;
+pub use self::forward_attrs::ForwardAttrs;
 pub use self::from_attributes::FromAttributesOptions;
 pub use self::from_derive::FdiOptions;
 pub use self::from_field::FromFieldOptions;

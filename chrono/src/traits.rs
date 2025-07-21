@@ -37,15 +37,11 @@ pub trait Datelike: Sized {
     #[inline]
     fn year_ce(&self) -> (bool, u32) {
         let year = self.year();
-        if year < 1 { (false, (1 - year) as u32) } else { (true, year as u32) }
-    }
-
-    /// Returns the quarter number starting from 1.
-    ///
-    /// The return value ranges from 1 to 4.
-    #[inline]
-    fn quarter(&self) -> u32 {
-        (self.month() - 1).div_euclid(3) + 1
+        if year < 1 {
+            (false, (1 - year) as u32)
+        } else {
+            (true, year as u32)
+        }
     }
 
     /// Returns the month number starting from 1.
@@ -105,7 +101,7 @@ pub trait Datelike: Sized {
     /// # Examples
     ///
     /// ```
-    /// use chrono::{Datelike, NaiveDate};
+    /// use chrono::{NaiveDate, Datelike};
     ///
     /// assert_eq!(
     ///     NaiveDate::from_ymd_opt(2020, 5, 13).unwrap().with_year(2023).unwrap(),
@@ -138,7 +134,7 @@ pub trait Datelike: Sized {
     /// # Examples
     ///
     /// ```
-    /// use chrono::{Datelike, NaiveDate};
+    /// use chrono::{NaiveDate, Datelike};
     ///
     /// assert_eq!(
     ///     NaiveDate::from_ymd_opt(2023, 5, 12).unwrap().with_month(9).unwrap(),
@@ -150,7 +146,7 @@ pub trait Datelike: Sized {
     ///
     /// Don't combine multiple `Datelike::with_*` methods. The intermediate value may not exist.
     /// ```
-    /// use chrono::{Datelike, NaiveDate};
+    /// use chrono::{NaiveDate, Datelike};
     ///
     /// fn with_year_month(date: NaiveDate, year: i32, month: u32) -> Option<NaiveDate> {
     ///     date.with_year(year)?.with_month(month)
@@ -242,7 +238,7 @@ pub trait Datelike: Sized {
     /// # Examples
     ///
     /// ```
-    /// use chrono::{Datelike, NaiveDate};
+    /// use chrono::{NaiveDate, Datelike};
     ///
     /// assert_eq!(NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().num_days_from_ce(), 719_163);
     /// assert_eq!(NaiveDate::from_ymd_opt(2, 1, 1).unwrap().num_days_from_ce(), 366);
@@ -334,7 +330,7 @@ pub trait Timelike: Sized {
 #[cfg(test)]
 mod tests {
     use super::Datelike;
-    use crate::{Days, NaiveDate};
+    use crate::{Duration, NaiveDate};
 
     /// Tests `Datelike::num_days_from_ce` against an alternative implementation.
     ///
@@ -381,7 +377,7 @@ mod tests {
                 "on {:?}",
                 jan1_year
             );
-            let mid_year = jan1_year + Days::new(133);
+            let mid_year = jan1_year + Duration::days(133);
             assert_eq!(
                 mid_year.num_days_from_ce(),
                 num_days_from_ce(&mid_year),

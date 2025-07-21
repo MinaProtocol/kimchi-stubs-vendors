@@ -1,4 +1,4 @@
-use super::{write_marker, RmpWrite};
+use super::{RmpWrite, write_marker};
 use crate::encode::ValueWriteError;
 use crate::Marker;
 

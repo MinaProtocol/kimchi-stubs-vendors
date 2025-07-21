@@ -1351,6 +1351,12 @@ impl Build {
             },
         );
 
+        // Checking for compiler flags does not require linking (and we _must_
+        // avoid making it do so, since it breaks cross-compilation when the C
+        // compiler isn't configured to be able to link).
+        // https://github.com/rust-lang/cc-rs/issues/1423
+        cmd.arg("-c");
+
         if compiler.supports_path_delimiter() {
             cmd.arg("--");
         }
@@ -3510,7 +3516,9 @@ impl Build {
                     "x86_64-unknown-linux-gnu" => self.find_working_gnu_prefix(&[
                         "x86_64-linux-gnu", // rustfmt wrap
                     ]), // explicit None if not found, so caller knows to fall back
-                    "x86_64-unknown-linux-musl" => Some("musl"),
+                    "x86_64-unknown-linux-musl" => {
+                        self.find_working_gnu_prefix(&["x86_64-linux-musl", "musl"])
+                    }
                     "x86_64-unknown-netbsd" => Some("x86_64--netbsd"),
                     _ => None,
                 }

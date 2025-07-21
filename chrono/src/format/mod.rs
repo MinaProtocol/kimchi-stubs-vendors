@@ -16,8 +16,8 @@
 //! C's `strftime` format. The available options can be found [here](./strftime/index.html).
 //!
 //! # Example
-//! ```
-//! # #[cfg(feature = "alloc")] {
+#![cfg_attr(not(feature = "std"), doc = "```ignore")]
+#![cfg_attr(feature = "std", doc = "```rust")]
 //! use chrono::{NaiveDateTime, TimeZone, Utc};
 //!
 //! let date_time = Utc.with_ymd_and_hms(2020, 11, 10, 0, 1, 32).unwrap();
@@ -27,11 +27,10 @@
 //!
 //! let parsed = NaiveDateTime::parse_from_str(&formatted, "%Y-%m-%d %H:%M:%S")?.and_utc();
 //! assert_eq!(parsed, date_time);
-//! # }
 //! # Ok::<(), chrono::ParseError>(())
 //! ```
 
-#[cfg(all(feature = "alloc", not(feature = "std"), not(test)))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 use alloc::boxed::Box;
 use core::fmt;
 use core::str::FromStr;
@@ -54,15 +53,15 @@ pub mod strftime;
 // not require `alloc`.
 pub(crate) mod locales;
 
-pub use formatting::SecondsFormat;
 pub(crate) use formatting::write_hundreds;
 #[cfg(feature = "alloc")]
 pub(crate) use formatting::write_rfc2822;
-#[cfg(any(feature = "alloc", feature = "serde"))]
+#[cfg(any(feature = "alloc", feature = "serde", feature = "rustc-serialize"))]
 pub(crate) use formatting::write_rfc3339;
+pub use formatting::SecondsFormat;
 #[cfg(feature = "alloc")]
 #[allow(deprecated)]
-pub use formatting::{DelayedFormat, format, format_item};
+pub use formatting::{format, format_item, DelayedFormat};
 #[cfg(feature = "unstable-locales")]
 pub use locales::Locale;
 pub(crate) use parse::parse_rfc3339;
@@ -98,7 +97,6 @@ pub enum Pad {
 /// It also trims the preceding whitespace if any.
 /// It cannot parse the negative number, so some date and time cannot be formatted then
 /// parsed with the same formatting items.
-#[non_exhaustive]
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Numeric {
     /// Full Gregorian year (FW=4, PW=∞).
@@ -115,8 +113,6 @@ pub enum Numeric {
     IsoYearDiv100,
     /// Year in the ISO week date, modulo 100 (FW=PW=2). Cannot be negative.
     IsoYearMod100,
-    /// Quarter (FW=PW=1).
-    Quarter,
     /// Month (FW=PW=2).
     Month,
     /// Day of the month (FW=PW=2).
@@ -172,7 +168,6 @@ impl fmt::Debug for InternalNumeric {
 ///
 /// They have their own rules of formatting and parsing.
 /// Otherwise noted, they print in the specified cases but parse case-insensitively.
-#[non_exhaustive]
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Fixed {
     /// Abbreviated month names.
@@ -368,22 +363,6 @@ const fn internal_fixed(val: InternalInternal) -> Item<'static> {
     Item::Fixed(Fixed::Internal(InternalFixed { val }))
 }
 
-impl Item<'_> {
-    /// Convert items that contain a reference to the format string into an owned variant.
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub fn to_owned(self) -> Item<'static> {
-        match self {
-            Item::Literal(s) => Item::OwnedLiteral(Box::from(s)),
-            Item::Space(s) => Item::OwnedSpace(Box::from(s)),
-            Item::Numeric(n, p) => Item::Numeric(n, p),
-            Item::Fixed(f) => Item::Fixed(f),
-            Item::OwnedLiteral(l) => Item::OwnedLiteral(l),
-            Item::OwnedSpace(s) => Item::OwnedSpace(s),
-            Item::Error => Item::Error,
-        }
-    }
-}
-
 /// An error from the `parse` function.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
 pub struct ParseError(ParseErrorKind);
@@ -424,7 +403,7 @@ pub enum ParseErrorKind {
     /// All formatting items have been read but there is a remaining input.
     TooLong,
 
-    /// There was an error on the formatting string, or there were non-supported formatting items.
+    /// There was an error on the formatting string, or there were non-supported formating items.
     BadFormat,
 
     // TODO: Change this to `#[non_exhaustive]` (on the enum) with the next breaking release.

@@ -1,4 +1,4 @@
-use super::{read_marker, RmpRead, ValueReadError};
+use super::{RmpRead, read_marker, ValueReadError};
 use crate::Marker;
 
 /// Attempts to read exactly 5 bytes from the given reader and to decode them as `f32` value.

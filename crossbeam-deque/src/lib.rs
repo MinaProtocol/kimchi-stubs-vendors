@@ -82,7 +82,6 @@
 //! [`steal_batch()`]: Stealer::steal_batch
 //! [`steal_batch_and_pop()`]: Stealer::steal_batch_and_pop
 
-#![no_std]
 #![doc(test(
     no_crate_inject,
     attr(
@@ -96,9 +95,7 @@
     rust_2018_idioms,
     unreachable_pub
 )]
-
-#[cfg(feature = "std")]
-extern crate std;
+#![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]
 mod deque;

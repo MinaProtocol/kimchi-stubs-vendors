@@ -4,7 +4,6 @@ use std::fmt::{self, Debug};
 pub enum ParseResult {
     Success(Version),
     OopsClippy,
-    OopsMirai,
     Unrecognized,
 }
 
@@ -37,7 +36,6 @@ pub fn parse(string: &str) -> ParseResult {
     match words.next() {
         Some("rustc") => {}
         Some(word) if word.starts_with("clippy") => return ParseResult::OopsClippy,
-        Some("mirai") => return ParseResult::OopsMirai,
         Some(_) | None => return ParseResult::Unrecognized,
     }
 
@@ -59,9 +57,9 @@ fn parse_words(words: &mut dyn Iterator<Item = &str>) -> Option<Version> {
 
     let channel = match channel {
         None => Stable,
-        Some("dev") => Dev,
+        Some(channel) if channel == "dev" => Dev,
         Some(channel) if channel.starts_with("beta") => Beta,
-        Some("nightly") => match words.next() {
+        Some(channel) if channel == "nightly" => match words.next() {
             Some(hash) if hash.starts_with('(') => match words.next() {
                 None if hash.ends_with(')') => Dev,
                 Some(date) if date.ends_with(')') => {

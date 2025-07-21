@@ -1,6 +1,6 @@
 use super::Cursor;
 
-use rmp::decode::*;
+use crate::msgpack::decode::*;
 
 #[test]
 fn from_bool_false() {

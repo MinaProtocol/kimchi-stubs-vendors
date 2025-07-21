@@ -1,5 +1,5 @@
-use super::{read_marker, RmpRead, ValueReadError};
 use crate::Marker;
+use super::{read_marker, RmpRead, ValueReadError};
 
 /// Attempts to read a single byte from the given reader and to decode it as a positive fixnum
 /// value.

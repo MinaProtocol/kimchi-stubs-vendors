@@ -11,6 +11,7 @@ use core::arch::x86_64::*;
 macro_rules! impl_zeroize_for_simd_register {
     ($($type:ty),* $(,)?) => {
         $(
+            #[cfg_attr(docsrs, doc(cfg(any(target_arch = "x86", target_arch = "x86_64"))))]
             impl Zeroize for $type {
                 #[inline]
                 fn zeroize(&mut self) {
@@ -23,7 +24,3 @@ macro_rules! impl_zeroize_for_simd_register {
 }
 
 impl_zeroize_for_simd_register!(__m128, __m128d, __m128i, __m256, __m256d, __m256i);
-
-// NOTE: MSRV 1.72
-#[cfg(feature = "simd")]
-impl_zeroize_for_simd_register!(__m512, __m512d, __m512i);

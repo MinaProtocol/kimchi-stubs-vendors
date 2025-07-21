@@ -1,4 +1,4 @@
-use super::{write_marker, RmpWrite};
+use super::{RmpWrite, write_marker};
 use crate::encode::ValueWriteError;
 use crate::Marker;
 
@@ -10,27 +10,22 @@ use crate::Marker;
 /// This function will return `ValueWriteError` on any I/O error occurred while writing either the
 /// marker or the data.
 pub fn write_str_len<W: RmpWrite>(wr: &mut W, len: u32) -> Result<Marker, ValueWriteError<W::Error>> {
-    let marker = if len < 32 {
-        Marker::FixStr(len as u8)
+    if len < 32 {
+        write_marker(wr, Marker::FixStr(len as u8))?;
+        Ok(Marker::FixStr(len as u8))
     } else if len < 256 {
-        Marker::Str8
-    } else if len <= u16::MAX as u32 {
-        Marker::Str16
-    } else {
-        Marker::Str32
-    };
-
-    write_marker(wr, marker)?;
-    if marker == Marker::Str8 {
+        write_marker(wr, Marker::Str8)?;
         wr.write_data_u8(len as u8)?;
-    }
-    if marker == Marker::Str16 {
+        Ok(Marker::Str8)
+    } else if len <= u16::MAX as u32 {
+        write_marker(wr, Marker::Str16)?;
         wr.write_data_u16(len as u16)?;
-    }
-    if marker == Marker::Str32 {
+        Ok(Marker::Str16)
+    } else {
+        write_marker(wr, Marker::Str32)?;
         wr.write_data_u32(len)?;
+        Ok(Marker::Str32)
     }
-    Ok(marker)
 }
 
 /// Encodes and attempts to write the most efficient string binary representation to the
