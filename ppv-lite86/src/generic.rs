@@ -3,17 +3,13 @@
 use crate::soft::{x2, x4};
 use crate::types::*;
 use core::ops::*;
-use zerocopy::{FromBytes, IntoBytes};
 
-zerocopy::cryptocorrosion_derive_traits! {
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    pub union vec128_storage {
-        d: [u32; 4],
-        q: [u64; 2],
-    }
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub union vec128_storage {
+    d: [u32; 4],
+    q: [u64; 2],
 }
-
 impl From<[u32; 4]> for vec128_storage {
     #[inline(always)]
     fn from(d: [u32; 4]) -> Self {
@@ -456,23 +452,12 @@ impl Machine for GenericMachine {
     }
 }
 
-zerocopy::cryptocorrosion_derive_traits! {
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub struct u32x4_generic([u32; 4]);
-}
-
-zerocopy::cryptocorrosion_derive_traits! {
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub struct u64x2_generic([u64; 2]);
-}
-
-zerocopy::cryptocorrosion_derive_traits! {
-    #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, PartialEq)]
-    pub struct u128x1_generic([u128; 1]);
-}
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct u32x4_generic([u32; 4]);
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct u64x2_generic([u64; 2]);
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct u128x1_generic([u128; 1]);
 
 impl From<u32x4_generic> for vec128_storage {
     #[inline(always)]
@@ -576,45 +561,53 @@ impl BSwap for u128x1_generic {
 impl StoreBytes for u32x4_generic {
     #[inline(always)]
     unsafe fn unsafe_read_le(input: &[u8]) -> Self {
-        let x = u32x4_generic::read_from_bytes(input).unwrap();
+        assert_eq!(input.len(), 16);
+        let x = core::mem::transmute(core::ptr::read(input as *const _ as *const [u8; 16]));
         dmap(x, |x| x.to_le())
     }
     #[inline(always)]
     unsafe fn unsafe_read_be(input: &[u8]) -> Self {
-        let x = u32x4_generic::read_from_bytes(input).unwrap();
+        assert_eq!(input.len(), 16);
+        let x = core::mem::transmute(core::ptr::read(input as *const _ as *const [u8; 16]));
         dmap(x, |x| x.to_be())
     }
     #[inline(always)]
     fn write_le(self, out: &mut [u8]) {
+        assert_eq!(out.len(), 16);
         let x = dmap(self, |x| x.to_le());
-        x.write_to(out).unwrap();
+        unsafe { core::ptr::write(out as *mut _ as *mut [u8; 16], core::mem::transmute(x)) }
     }
     #[inline(always)]
     fn write_be(self, out: &mut [u8]) {
+        assert_eq!(out.len(), 16);
         let x = dmap(self, |x| x.to_be());
-        x.write_to(out).unwrap();
+        unsafe { core::ptr::write(out as *mut _ as *mut [u8; 16], core::mem::transmute(x)) }
     }
 }
 impl StoreBytes for u64x2_generic {
     #[inline(always)]
     unsafe fn unsafe_read_le(input: &[u8]) -> Self {
-        let x = u64x2_generic::read_from_bytes(input).unwrap();
+        assert_eq!(input.len(), 16);
+        let x = core::mem::transmute(core::ptr::read(input as *const _ as *const [u8; 16]));
         qmap(x, |x| x.to_le())
     }
     #[inline(always)]
     unsafe fn unsafe_read_be(input: &[u8]) -> Self {
-        let x = u64x2_generic::read_from_bytes(input).unwrap();
+        assert_eq!(input.len(), 16);
+        let x = core::mem::transmute(core::ptr::read(input as *const _ as *const [u8; 16]));
         qmap(x, |x| x.to_be())
     }
     #[inline(always)]
     fn write_le(self, out: &mut [u8]) {
+        assert_eq!(out.len(), 16);
         let x = qmap(self, |x| x.to_le());
-        x.write_to(out).unwrap();
+        unsafe { core::ptr::write(out as *mut _ as *mut [u8; 16], core::mem::transmute(x)) }
     }
     #[inline(always)]
     fn write_be(self, out: &mut [u8]) {
+        assert_eq!(out.len(), 16);
         let x = qmap(self, |x| x.to_be());
-        x.write_to(out).unwrap();
+        unsafe { core::ptr::write(out as *mut _ as *mut [u8; 16], core::mem::transmute(x)) }
     }
 }
 

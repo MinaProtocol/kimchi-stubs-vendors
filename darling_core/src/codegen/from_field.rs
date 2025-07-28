@@ -4,10 +4,9 @@ use syn::Ident;
 
 use crate::{
     codegen::{ExtractAttribute, OuterFromImpl, TraitImpl},
+    options::ForwardAttrs,
     util::PathList,
 };
-
-use super::ForwardAttrs;
 
 /// `impl FromField` generator. This is used for parsing an individual
 /// field and its attributes.
@@ -15,13 +14,14 @@ pub struct FromFieldImpl<'a> {
     pub ident: Option<&'a Ident>,
     pub vis: Option<&'a Ident>,
     pub ty: Option<&'a Ident>,
+    pub attrs: Option<&'a Ident>,
     pub base: TraitImpl<'a>,
     pub attr_names: &'a PathList,
-    pub forward_attrs: ForwardAttrs<'a>,
+    pub forward_attrs: Option<&'a ForwardAttrs>,
     pub from_ident: bool,
 }
 
-impl ToTokens for FromFieldImpl<'_> {
+impl<'a> ToTokens for FromFieldImpl<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let input = self.param_name();
 
@@ -43,7 +43,7 @@ impl ToTokens for FromFieldImpl<'_> {
             .map(|i| quote!(#i: #input.ident.clone(),));
         let passed_vis = self.vis.as_ref().map(|i| quote!(#i: #input.vis.clone(),));
         let passed_ty = self.ty.as_ref().map(|i| quote!(#i: #input.ty.clone(),));
-        let passed_attrs = self.forward_attrs.as_initializer();
+        let passed_attrs = self.attrs.as_ref().map(|i| quote!(#i: __fwd_attrs,));
 
         // Determine which attributes to forward (if any).
         let grab_attrs = self.extractor();
@@ -77,13 +77,13 @@ impl ToTokens for FromFieldImpl<'_> {
     }
 }
 
-impl ExtractAttribute for FromFieldImpl<'_> {
+impl<'a> ExtractAttribute for FromFieldImpl<'a> {
     fn attr_names(&self) -> &PathList {
         self.attr_names
     }
 
-    fn forward_attrs(&self) -> &super::ForwardAttrs<'_> {
-        &self.forward_attrs
+    fn forwarded_attrs(&self) -> Option<&ForwardAttrs> {
+        self.forward_attrs
     }
 
     fn param_name(&self) -> TokenStream {

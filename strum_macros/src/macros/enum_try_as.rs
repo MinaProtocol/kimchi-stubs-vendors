@@ -10,7 +10,6 @@ pub fn enum_try_as_inner(ast: &DeriveInput) -> syn::Result<TokenStream> {
     };
 
     let enum_name = &ast.ident;
-    let (impl_generics, ty_generics, where_clause) = ast.generics.split_for_impl();
 
     let variants: Vec<_> = variants
         .iter()
@@ -73,8 +72,9 @@ pub fn enum_try_as_inner(ast: &DeriveInput) -> syn::Result<TokenStream> {
         .collect();
 
     Ok(quote! {
-        impl #impl_generics #enum_name #ty_generics #where_clause {
+        impl #enum_name {
             #(#variants)*
         }
-    })
+    }
+    .into())
 }

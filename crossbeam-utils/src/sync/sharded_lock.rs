@@ -1,4 +1,3 @@
-use std::boxed::Box;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -9,7 +8,6 @@ use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::{LockResult, PoisonError, TryLockError, TryLockResult};
 use std::sync::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread::{self, ThreadId};
-use std::vec::Vec;
 
 use crate::sync::once_lock::OnceLock;
 use crate::CachePadded;
@@ -615,7 +613,7 @@ impl Drop for Registration {
     }
 }
 
-std::thread_local! {
+thread_local! {
     static REGISTRATION: Registration = {
         let thread_id = thread::current().id();
         let mut indices = thread_indices().lock().unwrap();

@@ -15,7 +15,6 @@ The following specifiers are available both to formatting and parsing.
 | `%C`  | `20`     | The proleptic Gregorian year divided by 100, zero-padded to 2 digits. [^1] |
 | `%y`  | `01`     | The proleptic Gregorian year modulo 100, zero-padded to 2 digits. [^1]     |
 |       |          |                                                                            |
-| `%q`  | `1`      | Quarter of year (1-4)                                                      |
 | `%m`  | `07`     | Month number (01--12), zero-padded to 2 digits.                            |
 | `%b`  | `Jul`    | Abbreviated month name. Always 3 letters.                                  |
 | `%B`  | `July`   | Full month name. Also accepts corresponding abbreviation in parsing.       |
@@ -100,8 +99,6 @@ Notes:
 
 [^1]: `%C`, `%y`:
    This is floor division, so 100 BCE (year number -99) will print `-1` and `99` respectively.
-   For `%y`, values greater or equal to 70 are interpreted as being in the 20th century,
-   values smaller than 70 in the 21st century.
 
 [^2]: `%U`:
    Week 1 starts with the first Sunday in that year.
@@ -159,35 +156,12 @@ Notes:
    China Daylight Time.
 */
 
-#[cfg(feature = "alloc")]
-extern crate alloc;
-
-#[cfg(any(feature = "alloc", feature = "std"))]
-use super::{BAD_FORMAT, ParseError};
-use super::{Fixed, InternalInternal, Item, Numeric, Pad};
-#[cfg(feature = "unstable-locales")]
-use super::{Locale, locales};
 use super::{fixed, internal_fixed, num, num0, nums};
-#[cfg(all(feature = "alloc", not(feature = "std"), not(test)))]
-use alloc::vec::Vec;
+#[cfg(feature = "unstable-locales")]
+use super::{locales, Locale};
+use super::{Fixed, InternalInternal, Item, Numeric, Pad};
 
 /// Parsing iterator for `strftime`-like format strings.
-///
-/// See the [`format::strftime` module](crate::format::strftime) for supported formatting
-/// specifiers.
-///
-/// `StrftimeItems` is used in combination with more low-level methods such as [`format::parse()`]
-/// or [`format_with_items`].
-///
-/// If formatting or parsing date and time values is not performance-critical, the methods
-/// [`parse_from_str`] and [`format`] on types such as [`DateTime`](crate::DateTime) are easier to
-/// use.
-///
-/// [`format`]: crate::DateTime::format
-/// [`format_with_items`]: crate::DateTime::format
-/// [`parse_from_str`]: crate::DateTime::parse_from_str
-/// [`DateTime`]: crate::DateTime
-/// [`format::parse()`]: crate::format::parse()
 #[derive(Clone, Debug)]
 pub struct StrftimeItems<'a> {
     /// Remaining portion of the string.
@@ -202,29 +176,7 @@ pub struct StrftimeItems<'a> {
 }
 
 impl<'a> StrftimeItems<'a> {
-    /// Creates a new parsing iterator from a `strftime`-like format string.
-    ///
-    /// # Errors
-    ///
-    /// While iterating [`Item::Error`] will be returned if the format string contains an invalid
-    /// or unrecognized formatting specifier.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use chrono::format::*;
-    ///
-    /// let strftime_parser = StrftimeItems::new("%F"); // %F: year-month-day (ISO 8601)
-    ///
-    /// const ISO8601_YMD_ITEMS: &[Item<'static>] = &[
-    ///     Item::Numeric(Numeric::Year, Pad::Zero),
-    ///     Item::Literal("-"),
-    ///     Item::Numeric(Numeric::Month, Pad::Zero),
-    ///     Item::Literal("-"),
-    ///     Item::Numeric(Numeric::Day, Pad::Zero),
-    /// ];
-    /// assert!(strftime_parser.eq(ISO8601_YMD_ITEMS.iter().cloned()));
-    /// ```
+    /// Creates a new parsing iterator from the `strftime`-like format string.
     #[must_use]
     pub const fn new(s: &'a str) -> StrftimeItems<'a> {
         #[cfg(not(feature = "unstable-locales"))]
@@ -237,152 +189,11 @@ impl<'a> StrftimeItems<'a> {
         }
     }
 
-    /// Creates a new parsing iterator from a `strftime`-like format string, with some formatting
-    /// specifiers adjusted to match [`Locale`].
-    ///
-    /// Note: `StrftimeItems::new_with_locale` only localizes the *format*. You usually want to
-    /// combine it with other locale-aware methods such as
-    /// [`DateTime::format_localized_with_items`] to get things like localized month or day names.
-    ///
-    /// The `%x` formatting specifier will use the local date format, `%X` the local time format,
-    ///  and `%c` the local format for date and time.
-    /// `%r` will use the local 12-hour clock format (e.g., 11:11:04 PM). Not all locales have such
-    /// a format, in which case we fall back to a 24-hour clock (`%X`).
-    ///
-    /// See the [`format::strftime` module](crate::format::strftime) for all supported formatting
-    /// specifiers.
-    ///
-    ///  [`DateTime::format_localized_with_items`]: crate::DateTime::format_localized_with_items
-    ///
-    /// # Errors
-    ///
-    /// While iterating [`Item::Error`] will be returned if the format string contains an invalid
-    /// or unrecognized formatting specifier.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # #[cfg(feature = "alloc")] {
-    /// use chrono::format::{Locale, StrftimeItems};
-    /// use chrono::{FixedOffset, TimeZone};
-    ///
-    /// let dt = FixedOffset::east_opt(9 * 60 * 60)
-    ///     .unwrap()
-    ///     .with_ymd_and_hms(2023, 7, 11, 0, 34, 59)
-    ///     .unwrap();
-    ///
-    /// // Note: you usually want to combine `StrftimeItems::new_with_locale` with other
-    /// // locale-aware methods such as `DateTime::format_localized_with_items`.
-    /// // We use the regular `format_with_items` to show only how the formatting changes.
-    ///
-    /// let fmtr = dt.format_with_items(StrftimeItems::new_with_locale("%x", Locale::en_US));
-    /// assert_eq!(fmtr.to_string(), "07/11/2023");
-    /// let fmtr = dt.format_with_items(StrftimeItems::new_with_locale("%x", Locale::ko_KR));
-    /// assert_eq!(fmtr.to_string(), "2023년 07월 11일");
-    /// let fmtr = dt.format_with_items(StrftimeItems::new_with_locale("%x", Locale::ja_JP));
-    /// assert_eq!(fmtr.to_string(), "2023年07月11日");
-    /// # }
-    /// ```
+    /// Creates a new parsing iterator from the `strftime`-like format string.
     #[cfg(feature = "unstable-locales")]
     #[must_use]
     pub const fn new_with_locale(s: &'a str, locale: Locale) -> StrftimeItems<'a> {
         StrftimeItems { remainder: s, queue: &[], locale_str: "", locale: Some(locale) }
-    }
-
-    /// Parse format string into a `Vec` of formatting [`Item`]'s.
-    ///
-    /// If you need to format or parse multiple values with the same format string, it is more
-    /// efficient to convert it to a `Vec` of formatting [`Item`]'s than to re-parse the format
-    /// string on every use.
-    ///
-    /// The `format_with_items` methods on [`DateTime`], [`NaiveDateTime`], [`NaiveDate`] and
-    /// [`NaiveTime`] accept the result for formatting. [`format::parse()`] can make use of it for
-    /// parsing.
-    ///
-    /// [`DateTime`]: crate::DateTime::format_with_items
-    /// [`NaiveDateTime`]: crate::NaiveDateTime::format_with_items
-    /// [`NaiveDate`]: crate::NaiveDate::format_with_items
-    /// [`NaiveTime`]: crate::NaiveTime::format_with_items
-    /// [`format::parse()`]: crate::format::parse()
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the format string contains an invalid or unrecognized formatting
-    /// specifier.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use chrono::format::{parse, Parsed, StrftimeItems};
-    /// use chrono::NaiveDate;
-    ///
-    /// let fmt_items = StrftimeItems::new("%e %b %Y %k.%M").parse()?;
-    /// let datetime = NaiveDate::from_ymd_opt(2023, 7, 11).unwrap().and_hms_opt(9, 0, 0).unwrap();
-    ///
-    /// // Formatting
-    /// assert_eq!(
-    ///     datetime.format_with_items(fmt_items.as_slice().iter()).to_string(),
-    ///     "11 Jul 2023  9.00"
-    /// );
-    ///
-    /// // Parsing
-    /// let mut parsed = Parsed::new();
-    /// parse(&mut parsed, "11 Jul 2023  9.00", fmt_items.as_slice().iter())?;
-    /// let parsed_dt = parsed.to_naive_datetime_with_offset(0)?;
-    /// assert_eq!(parsed_dt, datetime);
-    /// # Ok::<(), chrono::ParseError>(())
-    /// ```
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub fn parse(self) -> Result<Vec<Item<'a>>, ParseError> {
-        self.into_iter()
-            .map(|item| match item == Item::Error {
-                false => Ok(item),
-                true => Err(BAD_FORMAT),
-            })
-            .collect()
-    }
-
-    /// Parse format string into a `Vec` of [`Item`]'s that contain no references to slices of the
-    /// format string.
-    ///
-    /// A `Vec` created with [`StrftimeItems::parse`] contains references to the format string,
-    /// binding the lifetime of the `Vec` to that string. [`StrftimeItems::parse_to_owned`] will
-    /// convert the references to owned types.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the format string contains an invalid or unrecognized formatting
-    /// specifier.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use chrono::format::{Item, ParseError, StrftimeItems};
-    /// use chrono::NaiveDate;
-    ///
-    /// fn format_items(date_fmt: &str, time_fmt: &str) -> Result<Vec<Item<'static>>, ParseError> {
-    ///     // `fmt_string` is dropped at the end of this function.
-    ///     let fmt_string = format!("{} {}", date_fmt, time_fmt);
-    ///     StrftimeItems::new(&fmt_string).parse_to_owned()
-    /// }
-    ///
-    /// let fmt_items = format_items("%e %b %Y", "%k.%M")?;
-    /// let datetime = NaiveDate::from_ymd_opt(2023, 7, 11).unwrap().and_hms_opt(9, 0, 0).unwrap();
-    ///
-    /// assert_eq!(
-    ///     datetime.format_with_items(fmt_items.as_slice().iter()).to_string(),
-    ///     "11 Jul 2023  9.00"
-    /// );
-    /// # Ok::<(), ParseError>(())
-    /// ```
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    pub fn parse_to_owned(self) -> Result<Vec<Item<'static>>, ParseError> {
-        self.into_iter()
-            .map(|item| match item == Item::Error {
-                false => Ok(item.to_owned()),
-                true => Err(BAD_FORMAT),
-            })
-            .collect()
     }
 }
 
@@ -539,7 +350,6 @@ impl<'a> StrftimeItems<'a> {
                     'm' => num0(Month),
                     'n' => Space("\n"),
                     'p' => fixed(Fixed::UpperAmPm),
-                    'q' => num(Quarter),
                     #[cfg(not(feature = "unstable-locales"))]
                     'r' => queue_from_slice!(T_FMT_AMPM),
                     #[cfg(feature = "unstable-locales")]
@@ -688,8 +498,8 @@ mod tests {
     use crate::format::Item::{self, Literal, Space};
     #[cfg(feature = "unstable-locales")]
     use crate::format::Locale;
-    use crate::format::{Fixed, InternalInternal, Numeric::*};
     use crate::format::{fixed, internal_fixed, num, num0, nums};
+    use crate::format::{Fixed, InternalInternal, Numeric::*};
     #[cfg(feature = "alloc")]
     use crate::{DateTime, FixedOffset, NaiveDate, TimeZone, Timelike, Utc};
 
@@ -868,7 +678,6 @@ mod tests {
         assert_eq!(dt.format("%Y").to_string(), "2001");
         assert_eq!(dt.format("%C").to_string(), "20");
         assert_eq!(dt.format("%y").to_string(), "01");
-        assert_eq!(dt.format("%q").to_string(), "3");
         assert_eq!(dt.format("%m").to_string(), "07");
         assert_eq!(dt.format("%b").to_string(), "Jul");
         assert_eq!(dt.format("%B").to_string(), "July");
@@ -1096,22 +905,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(feature = "unstable-locales", feature = "alloc"))]
-    fn test_strftime_localized_time() {
-        let dt1 = Utc.with_ymd_and_hms(2024, 2, 9, 6, 54, 32).unwrap();
-        let dt2 = Utc.with_ymd_and_hms(2024, 2, 9, 18, 54, 32).unwrap();
-        // Some of these locales gave issues before pure-rust-locales 0.8.0 with chrono 0.4.27+
-        assert_eq!(dt1.format_localized("%X", Locale::nl_NL).to_string(), "06:54:32");
-        assert_eq!(dt2.format_localized("%X", Locale::nl_NL).to_string(), "18:54:32");
-        assert_eq!(dt1.format_localized("%X", Locale::en_US).to_string(), "06:54:32 AM");
-        assert_eq!(dt2.format_localized("%X", Locale::en_US).to_string(), "06:54:32 PM");
-        assert_eq!(dt1.format_localized("%X", Locale::hy_AM).to_string(), "06:54:32");
-        assert_eq!(dt2.format_localized("%X", Locale::hy_AM).to_string(), "18:54:32");
-        assert_eq!(dt1.format_localized("%X", Locale::chr_US).to_string(), "06:54:32 ᏌᎾᎴ");
-        assert_eq!(dt2.format_localized("%X", Locale::chr_US).to_string(), "06:54:32 ᏒᎯᏱᎢᏗᏢ");
-    }
-
-    #[test]
     #[cfg(all(feature = "unstable-locales", target_pointer_width = "64"))]
     fn test_type_sizes() {
         use core::mem::size_of;
@@ -1127,14 +920,5 @@ mod tests {
         assert_eq!(size_of::<Item>(), 12);
         assert_eq!(size_of::<StrftimeItems>(), 28);
         assert_eq!(size_of::<Locale>(), 2);
-    }
-
-    #[test]
-    #[cfg(any(feature = "alloc", feature = "std"))]
-    fn test_strftime_parse() {
-        let fmt_str = StrftimeItems::new("%Y-%m-%dT%H:%M:%S%z");
-        let fmt_items = fmt_str.parse().unwrap();
-        let dt = Utc.with_ymd_and_hms(2014, 5, 7, 12, 34, 56).unwrap();
-        assert_eq!(&dt.format_with_items(fmt_items.iter()).to_string(), "2014-05-07T12:34:56+0000");
     }
 }

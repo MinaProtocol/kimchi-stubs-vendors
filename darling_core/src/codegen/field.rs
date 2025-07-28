@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned, ToTokens, TokenStreamExt};
-use syn::{spanned::Spanned, Ident, Type};
+use syn::{spanned::Spanned, Ident, Path, Type};
 
 use crate::codegen::{DefaultExpression, PostfixTransform};
 use crate::usage::{self, IdentRefSet, IdentSet, UsesTypeParams};
@@ -22,43 +22,19 @@ pub struct Field<'a> {
     /// The type of the field in the input.
     pub ty: &'a Type,
     pub default_expression: Option<DefaultExpression<'a>>,
-    /// An expression that will be wrapped in a call to [`core::convert::identity`] and
-    /// then used for converting a provided value into the field value _before_ postfix
-    /// transforms are called.
-    pub with_callable: Cow<'a, syn::Expr>,
+    pub with_path: Cow<'a, Path>,
     pub post_transform: Option<&'a PostfixTransform>,
     pub skip: bool,
     pub multiple: bool,
-    /// If set, this field will be given all unclaimed meta items and will
-    /// not be exposed as a standard named field.
-    pub flatten: bool,
 }
 
 impl<'a> Field<'a> {
-    /// Get the name of the meta item that should be matched against input and should be used in diagnostics.
-    ///
-    /// This will be `None` if the field is `skip` or `flatten`, as neither kind of field is addressable
-    /// by name from the input meta.
-    pub fn as_name(&'a self) -> Option<&'a str> {
-        if self.skip || self.flatten {
-            None
-        } else {
-            Some(&self.name_in_attr)
-        }
+    pub fn as_name(&'a self) -> &'a str {
+        &self.name_in_attr
     }
 
     pub fn as_declaration(&'a self) -> Declaration<'a> {
         Declaration(self)
-    }
-
-    pub fn as_flatten_initializer(
-        &'a self,
-        parent_field_names: Vec<&'a str>,
-    ) -> FlattenInitializer<'a> {
-        FlattenInitializer {
-            field: self,
-            parent_field_names,
-        }
     }
 
     pub fn as_match(&'a self) -> MatchArm<'a> {
@@ -74,7 +50,7 @@ impl<'a> Field<'a> {
     }
 }
 
-impl UsesTypeParams for Field<'_> {
+impl<'a> UsesTypeParams for Field<'a> {
     fn uses_type_params<'b>(
         &self,
         options: &usage::Options,
@@ -87,9 +63,9 @@ impl UsesTypeParams for Field<'_> {
 /// An individual field during variable declaration in the generated parsing method.
 pub struct Declaration<'a>(&'a Field<'a>);
 
-impl ToTokens for Declaration<'_> {
+impl<'a> ToTokens for Declaration<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let field = self.0;
+        let field: &Field = self.0;
         let ident = field.ident;
         let ty = field.ty;
 
@@ -99,96 +75,44 @@ impl ToTokens for Declaration<'_> {
         } else {
             quote!(let mut #ident: (bool, ::darling::export::Option<#ty>) = (false, None);)
         });
-
-        // The flatten field additionally needs a place to buffer meta items
-        // until attribute walking is done, so declare that now.
-        //
-        // We expect there can only be one field marked `flatten`, so it shouldn't
-        // be possible for this to shadow another declaration.
-        if field.flatten {
-            tokens.append_all(quote! {
-                let mut __flatten: Vec<::darling::ast::NestedMeta> = vec![];
-            });
-        }
-    }
-}
-
-pub struct FlattenInitializer<'a> {
-    field: &'a Field<'a>,
-    parent_field_names: Vec<&'a str>,
-}
-
-impl ToTokens for FlattenInitializer<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let Self {
-            field,
-            parent_field_names,
-        } = self;
-        let ident = field.ident;
-
-        let add_parent_fields = if parent_field_names.is_empty() {
-            None
-        } else {
-            Some(quote! {
-                .map_err(|e| e.add_sibling_alts_for_unknown_field(&[#(#parent_field_names),*]))
-            })
-        };
-
-        tokens.append_all(quote! {
-            #ident = (true,
-                __errors.handle(
-                    ::darling::FromMeta::from_list(&__flatten) #add_parent_fields
-                    )
-                );
-        });
     }
 }
 
 /// Represents an individual field in the match.
 pub struct MatchArm<'a>(&'a Field<'a>);
 
-impl ToTokens for MatchArm<'_> {
+impl<'a> ToTokens for MatchArm<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let field = self.0;
+        let field: &Field = self.0;
+        if !field.skip {
+            let name_str = &field.name_in_attr;
+            let ident = field.ident;
+            let with_path = &field.with_path;
+            let post_transform = field.post_transform.as_ref();
 
-        // Skipped and flattened fields cannot be populated by a meta
-        // with their name, so they do not have a match arm.
-        if field.skip || field.flatten {
-            return;
-        }
+            // Errors include the location of the bad input, so we compute that here.
+            // Fields that take multiple values add the index of the error for convenience,
+            // while single-value fields only expose the name in the input attribute.
+            let location = if field.multiple {
+                // we use the local variable `len` here because location is accessed via
+                // a closure, and the borrow checker gets very unhappy if we try to immutably
+                // borrow `#ident` in that closure when it was declared `mut` outside.
+                quote!(&format!("{}[{}]", #name_str, __len))
+            } else {
+                quote!(#name_str)
+            };
 
-        let name_str = &field.name_in_attr;
-        let ident = field.ident;
-        let with_callable = &field.with_callable;
-        let post_transform = field.post_transform.as_ref();
+            // Give darling's generated code the span of the `with_path` so that if the target
+            // type doesn't impl FromMeta, darling's immediate user gets a properly-spanned error.
+            //
+            // Within the generated code, add the span immediately on extraction failure, so that it's
+            // as specific as possible.
+            // The behavior of `with_span` makes this safe to do; if the child applied an
+            // even-more-specific span, our attempt here will not overwrite that and will only cost
+            // us one `if` check.
+            let extractor = quote_spanned!(with_path.span()=>#with_path(__inner)#post_transform.map_err(|e| e.with_span(&__inner).at(#location)));
 
-        // Errors include the location of the bad input, so we compute that here.
-        // Fields that take multiple values add the index of the error for convenience,
-        // while single-value fields only expose the name in the input attribute.
-        let location = if field.multiple {
-            // we use the local variable `len` here because location is accessed via
-            // a closure, and the borrow checker gets very unhappy if we try to immutably
-            // borrow `#ident` in that closure when it was declared `mut` outside.
-            quote!(&format!("{}[{}]", #name_str, __len))
-        } else {
-            quote!(#name_str)
-        };
-
-        // Give darling's generated code the span of the `with_callable` so that if the target
-        // type doesn't impl FromMeta, darling's immediate user gets a properly-spanned error.
-        //
-        // Within the generated code, add the span immediately on extraction failure, so that it's
-        // as specific as possible.
-        // The behavior of `with_span` makes this safe to do; if the child applied an
-        // even-more-specific span, our attempt here will not overwrite that and will only cost
-        // us one `if` check.
-        let extractor = quote_spanned!(with_callable.span()=>
-        ::darling::export::identity::<fn(&::syn::Meta) -> ::darling::Result<_>>(#with_callable)(__inner)
-            #post_transform
-            .map_err(|e| e.with_span(&__inner).at(#location))
-        );
-
-        tokens.append_all(if field.multiple {
+            tokens.append_all(if field.multiple {
                 quote!(
                     #name_str => {
                         // Store the index of the name we're assessing in case we need
@@ -210,15 +134,16 @@ impl ToTokens for MatchArm<'_> {
                     }
                 )
             });
+        }
     }
 }
 
 /// Wrapper to generate initialization code for a field.
 pub struct Initializer<'a>(&'a Field<'a>);
 
-impl ToTokens for Initializer<'_> {
+impl<'a> ToTokens for Initializer<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let field = self.0;
+        let field: &Field = self.0;
         let ident = field.ident;
         tokens.append_all(if field.multiple {
             if let Some(ref expr) = field.default_expression {
@@ -245,7 +170,7 @@ impl ToTokens for Initializer<'_> {
 /// Creates an error if a field has no value and no default.
 pub struct CheckMissing<'a>(&'a Field<'a>);
 
-impl ToTokens for CheckMissing<'_> {
+impl<'a> ToTokens for CheckMissing<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         if !self.0.multiple && self.0.default_expression.is_none() {
             let ident = self.0.ident;

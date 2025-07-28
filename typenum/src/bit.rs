@@ -184,28 +184,18 @@ impl BitXor<B1> for B1 {
     }
 }
 
-#[cfg(test)]
-mod bit_op_tests {
-    use core::ops::{BitAnd, BitOr, BitXor, Not};
-
-    use crate::{B0, B1};
-
+#[cfg(tests)]
+mod tests {
     // macro for testing operation results. Uses `Same` to ensure the types are equal and
     // not just the values they evaluate to.
     macro_rules! test_bit_op {
         ($op:ident $Lhs:ident = $Answer:ident) => {{
-            type Test = <<$Lhs as $op>::Output as $crate::Same<$Answer>>::Output;
-            assert_eq!(
-                <$Answer as $crate::Bit>::to_u8(),
-                <Test as $crate::Bit>::to_u8()
-            );
+            type Test = <<$Lhs as $op>::Output as ::Same<$Answer>>::Output;
+            assert_eq!(<$Answer as Bit>::to_u8(), <Test as Bit>::to_u8());
         }};
         ($Lhs:ident $op:ident $Rhs:ident = $Answer:ident) => {{
-            type Test = <<$Lhs as $op<$Rhs>>::Output as $crate::Same<$Answer>>::Output;
-            assert_eq!(
-                <$Answer as $crate::Bit>::to_u8(),
-                <Test as $crate::Bit>::to_u8()
-            );
+            type Test = <<$Lhs as $op<$Rhs>>::Output as ::Same<$Answer>>::Output;
+            assert_eq!(<$Answer as Bit>::to_u8(), <Test as Bit>::to_u8());
         }};
     }
 
@@ -328,7 +318,7 @@ impl Max<B1> for B1 {
 }
 
 #[cfg(test)]
-mod bit_creation_tests {
+mod tests {
     #[test]
     fn bit_creation() {
         {
