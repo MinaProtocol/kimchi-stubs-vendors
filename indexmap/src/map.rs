@@ -3,7 +3,6 @@
 
 mod core;
 mod iter;
-mod mutable;
 mod slice;
 
 #[cfg(feature = "serde")]
@@ -16,11 +15,10 @@ mod tests;
 pub use self::core::raw_entry_v1::{self, RawEntryApiV1};
 pub use self::core::{Entry, IndexedEntry, OccupiedEntry, VacantEntry};
 pub use self::iter::{
-    Drain, IntoIter, IntoKeys, IntoValues, Iter, IterMut, IterMut2, Keys, Splice, Values, ValuesMut,
+    Drain, IntoIter, IntoKeys, IntoValues, Iter, IterMut, Keys, Splice, Values, ValuesMut,
 };
-pub use self::mutable::MutableEntryKey;
-pub use self::mutable::MutableKeys;
 pub use self::slice::Slice;
+pub use crate::mutable_keys::MutableKeys;
 
 #[cfg(feature = "rayon")]
 pub use crate::rayon::map as rayon;
@@ -28,7 +26,6 @@ pub use crate::rayon::map as rayon;
 use ::core::cmp::Ordering;
 use ::core::fmt;
 use ::core::hash::{BuildHasher, Hash, Hasher};
-use ::core::mem;
 use ::core::ops::{Index, IndexMut, RangeBounds};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -144,17 +141,15 @@ where
     K: fmt::Debug,
     V: fmt::Debug,
 {
-    #[cfg(not(feature = "test_debug"))]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self.iter()).finish()
-    }
-
-    #[cfg(feature = "test_debug")]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Let the inner `IndexMapCore` print all of its details
-        f.debug_struct("IndexMap")
-            .field("core", &self.core)
-            .finish()
+        if cfg!(not(feature = "test_debug")) {
+            f.debug_map().entries(self.iter()).finish()
+        } else {
+            // Let the inner `IndexMapCore` print all of its details
+            f.debug_struct("IndexMap")
+                .field("core", &self.core)
+                .finish()
+        }
     }
 }
 
@@ -299,7 +294,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     ///
     /// ***Panics*** if the starting point is greater than the end point or if
     /// the end point is greater than the length of the map.
-    #[track_caller]
     pub fn drain<R>(&mut self, range: R) -> Drain<'_, K, V>
     where
         R: RangeBounds<usize>,
@@ -314,7 +308,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// the elements `[0, at)` with its previous capacity unchanged.
     ///
     /// ***Panics*** if `at > len`.
-    #[track_caller]
     pub fn split_off(&mut self, at: usize) -> Self
     where
         S: Clone,
@@ -387,14 +380,14 @@ where
     ///
     /// If an equivalent key already exists in the map: the key remains and
     /// retains in its place in the order, its corresponding value is updated
-    /// with `value`, and the older value is returned inside `Some(_)`.
+    /// with `value` and the older value is returned inside `Some(_)`.
     ///
     /// If no equivalent key existed in the map: the new key-value pair is
     /// inserted, last in order, and `None` is returned.
     ///
     /// Computes in **O(1)** time (amortized average).
     ///
-    /// See also [`entry`][Self::entry] if you want to insert *or* modify,
+    /// See also [`entry`][Self::entry] if you you want to insert *or* modify,
     /// or [`insert_full`][Self::insert_full] if you need to get the index of
     /// the corresponding key-value pair.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -405,205 +398,17 @@ where
     ///
     /// If an equivalent key already exists in the map: the key remains and
     /// retains in its place in the order, its corresponding value is updated
-    /// with `value`, and the older value is returned inside `(index, Some(_))`.
+    /// with `value` and the older value is returned inside `(index, Some(_))`.
     ///
     /// If no equivalent key existed in the map: the new key-value pair is
     /// inserted, last in order, and `(index, None)` is returned.
     ///
     /// Computes in **O(1)** time (amortized average).
     ///
-    /// See also [`entry`][Self::entry] if you want to insert *or* modify.
+    /// See also [`entry`][Self::entry] if you you want to insert *or* modify.
     pub fn insert_full(&mut self, key: K, value: V) -> (usize, Option<V>) {
         let hash = self.hash(&key);
         self.core.insert_full(hash, key, value)
-    }
-
-    /// Insert a key-value pair in the map at its ordered position among sorted keys.
-    ///
-    /// This is equivalent to finding the position with
-    /// [`binary_search_keys`][Self::binary_search_keys], then either updating
-    /// it or calling [`insert_before`][Self::insert_before] for a new key.
-    ///
-    /// If the sorted key is found in the map, its corresponding value is
-    /// updated with `value`, and the older value is returned inside
-    /// `(index, Some(_))`. Otherwise, the new key-value pair is inserted at
-    /// the sorted position, and `(index, None)` is returned.
-    ///
-    /// If the existing keys are **not** already sorted, then the insertion
-    /// index is unspecified (like [`slice::binary_search`]), but the key-value
-    /// pair is moved to or inserted at that position regardless.
-    ///
-    /// Computes in **O(n)** time (average). Instead of repeating calls to
-    /// `insert_sorted`, it may be faster to call batched [`insert`][Self::insert]
-    /// or [`extend`][Self::extend] and only call [`sort_keys`][Self::sort_keys]
-    /// or [`sort_unstable_keys`][Self::sort_unstable_keys] once.
-    pub fn insert_sorted(&mut self, key: K, value: V) -> (usize, Option<V>)
-    where
-        K: Ord,
-    {
-        match self.binary_search_keys(&key) {
-            Ok(i) => (i, Some(mem::replace(&mut self[i], value))),
-            Err(i) => self.insert_before(i, key, value),
-        }
-    }
-
-    /// Insert a key-value pair in the map before the entry at the given index, or at the end.
-    ///
-    /// If an equivalent key already exists in the map: the key remains and
-    /// is moved to the new position in the map, its corresponding value is updated
-    /// with `value`, and the older value is returned inside `Some(_)`. The returned index
-    /// will either be the given index or one less, depending on how the entry moved.
-    /// (See [`shift_insert`](Self::shift_insert) for different behavior here.)
-    ///
-    /// If no equivalent key existed in the map: the new key-value pair is
-    /// inserted exactly at the given index, and `None` is returned.
-    ///
-    /// ***Panics*** if `index` is out of bounds.
-    /// Valid indices are `0..=map.len()` (inclusive).
-    ///
-    /// Computes in **O(n)** time (average).
-    ///
-    /// See also [`entry`][Self::entry] if you want to insert *or* modify,
-    /// perhaps only using the index for new entries with [`VacantEntry::shift_insert`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use indexmap::IndexMap;
-    /// let mut map: IndexMap<char, ()> = ('a'..='z').map(|c| (c, ())).collect();
-    ///
-    /// // The new key '*' goes exactly at the given index.
-    /// assert_eq!(map.get_index_of(&'*'), None);
-    /// assert_eq!(map.insert_before(10, '*', ()), (10, None));
-    /// assert_eq!(map.get_index_of(&'*'), Some(10));
-    ///
-    /// // Moving the key 'a' up will shift others down, so this moves *before* 10 to index 9.
-    /// assert_eq!(map.insert_before(10, 'a', ()), (9, Some(())));
-    /// assert_eq!(map.get_index_of(&'a'), Some(9));
-    /// assert_eq!(map.get_index_of(&'*'), Some(10));
-    ///
-    /// // Moving the key 'z' down will shift others up, so this moves to exactly 10.
-    /// assert_eq!(map.insert_before(10, 'z', ()), (10, Some(())));
-    /// assert_eq!(map.get_index_of(&'z'), Some(10));
-    /// assert_eq!(map.get_index_of(&'*'), Some(11));
-    ///
-    /// // Moving or inserting before the endpoint is also valid.
-    /// assert_eq!(map.len(), 27);
-    /// assert_eq!(map.insert_before(map.len(), '*', ()), (26, Some(())));
-    /// assert_eq!(map.get_index_of(&'*'), Some(26));
-    /// assert_eq!(map.insert_before(map.len(), '+', ()), (27, None));
-    /// assert_eq!(map.get_index_of(&'+'), Some(27));
-    /// assert_eq!(map.len(), 28);
-    /// ```
-    #[track_caller]
-    pub fn insert_before(&mut self, mut index: usize, key: K, value: V) -> (usize, Option<V>) {
-        let len = self.len();
-
-        assert!(
-            index <= len,
-            "index out of bounds: the len is {len} but the index is {index}. Expected index <= len"
-        );
-
-        match self.entry(key) {
-            Entry::Occupied(mut entry) => {
-                if index > entry.index() {
-                    // Some entries will shift down when this one moves up,
-                    // so "insert before index" becomes "move to index - 1",
-                    // keeping the entry at the original index unmoved.
-                    index -= 1;
-                }
-                let old = mem::replace(entry.get_mut(), value);
-                entry.move_index(index);
-                (index, Some(old))
-            }
-            Entry::Vacant(entry) => {
-                entry.shift_insert(index, value);
-                (index, None)
-            }
-        }
-    }
-
-    /// Insert a key-value pair in the map at the given index.
-    ///
-    /// If an equivalent key already exists in the map: the key remains and
-    /// is moved to the given index in the map, its corresponding value is updated
-    /// with `value`, and the older value is returned inside `Some(_)`.
-    /// Note that existing entries **cannot** be moved to `index == map.len()`!
-    /// (See [`insert_before`](Self::insert_before) for different behavior here.)
-    ///
-    /// If no equivalent key existed in the map: the new key-value pair is
-    /// inserted at the given index, and `None` is returned.
-    ///
-    /// ***Panics*** if `index` is out of bounds.
-    /// Valid indices are `0..map.len()` (exclusive) when moving an existing entry, or
-    /// `0..=map.len()` (inclusive) when inserting a new key.
-    ///
-    /// Computes in **O(n)** time (average).
-    ///
-    /// See also [`entry`][Self::entry] if you want to insert *or* modify,
-    /// perhaps only using the index for new entries with [`VacantEntry::shift_insert`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use indexmap::IndexMap;
-    /// let mut map: IndexMap<char, ()> = ('a'..='z').map(|c| (c, ())).collect();
-    ///
-    /// // The new key '*' goes exactly at the given index.
-    /// assert_eq!(map.get_index_of(&'*'), None);
-    /// assert_eq!(map.shift_insert(10, '*', ()), None);
-    /// assert_eq!(map.get_index_of(&'*'), Some(10));
-    ///
-    /// // Moving the key 'a' up to 10 will shift others down, including the '*' that was at 10.
-    /// assert_eq!(map.shift_insert(10, 'a', ()), Some(()));
-    /// assert_eq!(map.get_index_of(&'a'), Some(10));
-    /// assert_eq!(map.get_index_of(&'*'), Some(9));
-    ///
-    /// // Moving the key 'z' down to 9 will shift others up, including the '*' that was at 9.
-    /// assert_eq!(map.shift_insert(9, 'z', ()), Some(()));
-    /// assert_eq!(map.get_index_of(&'z'), Some(9));
-    /// assert_eq!(map.get_index_of(&'*'), Some(10));
-    ///
-    /// // Existing keys can move to len-1 at most, but new keys can insert at the endpoint.
-    /// assert_eq!(map.len(), 27);
-    /// assert_eq!(map.shift_insert(map.len() - 1, '*', ()), Some(()));
-    /// assert_eq!(map.get_index_of(&'*'), Some(26));
-    /// assert_eq!(map.shift_insert(map.len(), '+', ()), None);
-    /// assert_eq!(map.get_index_of(&'+'), Some(27));
-    /// assert_eq!(map.len(), 28);
-    /// ```
-    ///
-    /// ```should_panic
-    /// use indexmap::IndexMap;
-    /// let mut map: IndexMap<char, ()> = ('a'..='z').map(|c| (c, ())).collect();
-    ///
-    /// // This is an invalid index for moving an existing key!
-    /// map.shift_insert(map.len(), 'a', ());
-    /// ```
-    #[track_caller]
-    pub fn shift_insert(&mut self, index: usize, key: K, value: V) -> Option<V> {
-        let len = self.len();
-        match self.entry(key) {
-            Entry::Occupied(mut entry) => {
-                assert!(
-                    index < len,
-                    "index out of bounds: the len is {len} but the index is {index}"
-                );
-
-                let old = mem::replace(entry.get_mut(), value);
-                entry.move_index(index);
-                Some(old)
-            }
-            Entry::Vacant(entry) => {
-                assert!(
-                    index <= len,
-                    "index out of bounds: the len is {len} but the index is {index}. Expected index <= len"
-                );
-
-                entry.shift_insert(index, value);
-                None
-            }
-        }
     }
 
     /// Get the given key’s corresponding entry in the map for insertion and/or
@@ -645,42 +450,12 @@ where
     /// assert!(map.into_iter().eq([(0, '_'), (1, 'A'), (5, 'E'), (3, 'C'), (2, 'B'), (4, 'D')]));
     /// assert_eq!(removed, &[(2, 'b'), (3, 'c')]);
     /// ```
-    #[track_caller]
     pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, I::IntoIter, K, V, S>
     where
         R: RangeBounds<usize>,
         I: IntoIterator<Item = (K, V)>,
     {
         Splice::new(self, range, replace_with.into_iter())
-    }
-
-    /// Moves all key-value pairs from `other` into `self`, leaving `other` empty.
-    ///
-    /// This is equivalent to calling [`insert`][Self::insert] for each
-    /// key-value pair from `other` in order, which means that for keys that
-    /// already exist in `self`, their value is updated in the current position.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use indexmap::IndexMap;
-    ///
-    /// // Note: Key (3) is present in both maps.
-    /// let mut a = IndexMap::from([(3, "c"), (2, "b"), (1, "a")]);
-    /// let mut b = IndexMap::from([(3, "d"), (4, "e"), (5, "f")]);
-    /// let old_capacity = b.capacity();
-    ///
-    /// a.append(&mut b);
-    ///
-    /// assert_eq!(a.len(), 5);
-    /// assert_eq!(b.len(), 0);
-    /// assert_eq!(b.capacity(), old_capacity);
-    ///
-    /// assert!(a.keys().eq(&[3, 2, 1, 4, 5]));
-    /// assert_eq!(a[&3], "d"); // "c" was overwritten.
-    /// ```
-    pub fn append<S2>(&mut self, other: &mut IndexMap<K, V, S2>) {
-        self.extend(other.drain(..));
     }
 }
 
@@ -697,9 +472,9 @@ where
     /// Return `true` if an equivalent to `key` exists in the map.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         self.get_index_of(key).is_some()
     }
@@ -708,9 +483,9 @@ where
     /// else `None`.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &self.as_entries()[i];
@@ -724,9 +499,9 @@ where
     /// if it is present, else `None`.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&K, &V)>
+    pub fn get_key_value<Q: ?Sized>(&self, key: &Q) -> Option<(&K, &V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &self.as_entries()[i];
@@ -737,9 +512,9 @@ where
     }
 
     /// Return item index, key and value
-    pub fn get_full<Q>(&self, key: &Q) -> Option<(usize, &K, &V)>
+    pub fn get_full<Q: ?Sized>(&self, key: &Q) -> Option<(usize, &K, &V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &self.as_entries()[i];
@@ -752,23 +527,21 @@ where
     /// Return item index, if it exists in the map
     ///
     /// Computes in **O(1)** time (average).
-    pub fn get_index_of<Q>(&self, key: &Q) -> Option<usize>
+    pub fn get_index_of<Q: ?Sized>(&self, key: &Q) -> Option<usize>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
-        match self.as_entries() {
-            [] => None,
-            [x] => key.equivalent(&x.key).then_some(0),
-            _ => {
-                let hash = self.hash(key);
-                self.core.get_index_of(hash, key)
-            }
+        if self.is_empty() {
+            None
+        } else {
+            let hash = self.hash(key);
+            self.core.get_index_of(hash, key)
         }
     }
 
-    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &mut self.as_entries_mut()[i];
@@ -778,9 +551,9 @@ where
         }
     }
 
-    pub fn get_full_mut<Q>(&mut self, key: &Q) -> Option<(usize, &K, &mut V)>
+    pub fn get_full_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<(usize, &K, &mut V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         if let Some(i) = self.get_index_of(key) {
             let entry = &mut self.as_entries_mut()[i];
@@ -799,9 +572,9 @@ where
     /// [`.shift_remove(key)`][Self::shift_remove] instead.
     #[deprecated(note = "`remove` disrupts the map order -- \
         use `swap_remove` or `shift_remove` for explicit behavior.")]
-    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         self.swap_remove(key)
     }
@@ -814,9 +587,9 @@ where
     /// use [`.shift_remove_entry(key)`][Self::shift_remove_entry] instead.
     #[deprecated(note = "`remove_entry` disrupts the map order -- \
         use `swap_remove_entry` or `shift_remove_entry` for explicit behavior.")]
-    pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    pub fn remove_entry<Q: ?Sized>(&mut self, key: &Q) -> Option<(K, V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         self.swap_remove_entry(key)
     }
@@ -831,9 +604,9 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn swap_remove<Q>(&mut self, key: &Q) -> Option<V>
+    pub fn swap_remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         self.swap_remove_full(key).map(third)
     }
@@ -847,9 +620,9 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn swap_remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    pub fn swap_remove_entry<Q: ?Sized>(&mut self, key: &Q) -> Option<(K, V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         match self.swap_remove_full(key) {
             Some((_, key, value)) => Some((key, value)),
@@ -867,21 +640,15 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(1)** time (average).
-    pub fn swap_remove_full<Q>(&mut self, key: &Q) -> Option<(usize, K, V)>
+    pub fn swap_remove_full<Q: ?Sized>(&mut self, key: &Q) -> Option<(usize, K, V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
-        match self.as_entries() {
-            [x] if key.equivalent(&x.key) => {
-                let (k, v) = self.core.pop()?;
-                Some((0, k, v))
-            }
-            [_] | [] => None,
-            _ => {
-                let hash = self.hash(key);
-                self.core.swap_remove_full(hash, key)
-            }
+        if self.is_empty() {
+            return None;
         }
+        let hash = self.hash(key);
+        self.core.swap_remove_full(hash, key)
     }
 
     /// Remove the key-value pair equivalent to `key` and return
@@ -894,9 +661,9 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(n)** time (average).
-    pub fn shift_remove<Q>(&mut self, key: &Q) -> Option<V>
+    pub fn shift_remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         self.shift_remove_full(key).map(third)
     }
@@ -910,9 +677,9 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(n)** time (average).
-    pub fn shift_remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    pub fn shift_remove_entry<Q: ?Sized>(&mut self, key: &Q) -> Option<(K, V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
         match self.shift_remove_full(key) {
             Some((_, key, value)) => Some((key, value)),
@@ -930,21 +697,15 @@ where
     /// Return `None` if `key` is not in map.
     ///
     /// Computes in **O(n)** time (average).
-    pub fn shift_remove_full<Q>(&mut self, key: &Q) -> Option<(usize, K, V)>
+    pub fn shift_remove_full<Q: ?Sized>(&mut self, key: &Q) -> Option<(usize, K, V)>
     where
-        Q: ?Sized + Hash + Equivalent<K>,
+        Q: Hash + Equivalent<K>,
     {
-        match self.as_entries() {
-            [x] if key.equivalent(&x.key) => {
-                let (k, v) = self.core.pop()?;
-                Some((0, k, v))
-            }
-            [_] | [] => None,
-            _ => {
-                let hash = self.hash(key);
-                self.core.shift_remove_full(hash, key)
-            }
+        if self.is_empty() {
+            return None;
         }
+        let hash = self.hash(key);
+        self.core.shift_remove_full(hash, key)
     }
 }
 
@@ -954,7 +715,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// This preserves the order of the remaining elements.
     ///
     /// Computes in **O(1)** time (average).
-    #[doc(alias = "pop_last")] // like `BTreeMap`
     pub fn pop(&mut self) -> Option<(K, V)> {
         self.core.pop()
     }
@@ -973,11 +733,14 @@ impl<K, V, S> IndexMap<K, V, S> {
         self.core.retain_in_order(move |k, v| keep(k, v));
     }
 
+    pub(crate) fn retain_mut<F>(&mut self, keep: F)
+    where
+        F: FnMut(&mut K, &mut V) -> bool,
+    {
+        self.core.retain_in_order(keep);
+    }
+
     /// Sort the map’s key-value pairs by the default ordering of the keys.
-    ///
-    /// This is a stable sort -- but equivalent keys should not normally coexist in
-    /// a map at all, so [`sort_unstable_keys`][Self::sort_unstable_keys] is preferred
-    /// because it is generally faster and doesn't allocate auxiliary memory.
     ///
     /// See [`sort_by`](Self::sort_by) for details.
     pub fn sort_keys(&mut self)
@@ -1168,7 +931,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Get a key-value pair by index
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
     pub fn get_index(&self, index: usize) -> Option<(&K, &V)> {
@@ -1177,7 +940,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Get a key-value pair by index
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
     pub fn get_index_mut(&mut self, index: usize) -> Option<(&K, &mut V)> {
@@ -1186,7 +949,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Get an entry in the map by index for in-place manipulation.
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
     pub fn get_index_entry(&mut self, index: usize) -> Option<IndexedEntry<'_, K, V>> {
@@ -1198,7 +961,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Returns a slice of key-value pairs in the given range of indices.
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
     pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<K, V>> {
@@ -1209,7 +972,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Returns a mutable slice of key-value pairs in the given range of indices.
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
     pub fn get_range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> Option<&mut Slice<K, V>> {
@@ -1221,7 +984,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// Get the first key-value pair
     ///
     /// Computes in **O(1)** time.
-    #[doc(alias = "first_key_value")] // like `BTreeMap`
     pub fn first(&self) -> Option<(&K, &V)> {
         self.as_entries().first().map(Bucket::refs)
     }
@@ -1233,17 +995,9 @@ impl<K, V, S> IndexMap<K, V, S> {
         self.as_entries_mut().first_mut().map(Bucket::ref_mut)
     }
 
-    /// Get the first entry in the map for in-place manipulation.
-    ///
-    /// Computes in **O(1)** time.
-    pub fn first_entry(&mut self) -> Option<IndexedEntry<'_, K, V>> {
-        self.get_index_entry(0)
-    }
-
     /// Get the last key-value pair
     ///
     /// Computes in **O(1)** time.
-    #[doc(alias = "last_key_value")] // like `BTreeMap`
     pub fn last(&self) -> Option<(&K, &V)> {
         self.as_entries().last().map(Bucket::refs)
     }
@@ -1255,16 +1009,9 @@ impl<K, V, S> IndexMap<K, V, S> {
         self.as_entries_mut().last_mut().map(Bucket::ref_mut)
     }
 
-    /// Get the last entry in the map for in-place manipulation.
-    ///
-    /// Computes in **O(1)** time.
-    pub fn last_entry(&mut self) -> Option<IndexedEntry<'_, K, V>> {
-        self.get_index_entry(self.len().checked_sub(1)?)
-    }
-
     /// Remove the key-value pair by index
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Like [`Vec::swap_remove`], the pair is removed by swapping it with the
     /// last element of the map and popping it off. **This perturbs
@@ -1277,7 +1024,7 @@ impl<K, V, S> IndexMap<K, V, S> {
 
     /// Remove the key-value pair by index
     ///
-    /// Valid indices are `0 <= index < self.len()`.
+    /// Valid indices are *0 <= index < self.len()*
     ///
     /// Like [`Vec::remove`], the pair is removed by shifting all of the
     /// elements that follow it, preserving their relative order.
@@ -1297,7 +1044,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// ***Panics*** if `from` or `to` are out of bounds.
     ///
     /// Computes in **O(n)** time (average).
-    #[track_caller]
     pub fn move_index(&mut self, from: usize, to: usize) {
         self.core.move_index(from, to)
     }
@@ -1305,9 +1051,6 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// Swaps the position of two key-value pairs in the map.
     ///
     /// ***Panics*** if `a` or `b` are out of bounds.
-    ///
-    /// Computes in **O(1)** time (average).
-    #[track_caller]
     pub fn swap_indices(&mut self, a: usize, b: usize) {
         self.core.swap_indices(a, b)
     }
@@ -1346,7 +1089,7 @@ where
     ///
     /// ***Panics*** if `key` is not present in the map.
     fn index(&self, key: &Q) -> &V {
-        self.get(key).expect("no entry found for key")
+        self.get(key).expect("IndexMap: key not found")
     }
 }
 
@@ -1388,7 +1131,7 @@ where
     ///
     /// ***Panics*** if `key` is not present in the map.
     fn index_mut(&mut self, key: &Q) -> &mut V {
-        self.get_mut(key).expect("no entry found for key")
+        self.get_mut(key).expect("IndexMap: key not found")
     }
 }
 
@@ -1432,12 +1175,7 @@ impl<K, V, S> Index<usize> for IndexMap<K, V, S> {
     /// ***Panics*** if `index` is out of bounds.
     fn index(&self, index: usize) -> &V {
         self.get_index(index)
-            .unwrap_or_else(|| {
-                panic!(
-                    "index out of bounds: the len is {len} but the index is {index}",
-                    len = self.len()
-                );
-            })
+            .expect("IndexMap: index out of bounds")
             .1
     }
 }
@@ -1476,12 +1214,8 @@ impl<K, V, S> IndexMut<usize> for IndexMap<K, V, S> {
     ///
     /// ***Panics*** if `index` is out of bounds.
     fn index_mut(&mut self, index: usize) -> &mut V {
-        let len: usize = self.len();
-
         self.get_index_mut(index)
-            .unwrap_or_else(|| {
-                panic!("index out of bounds: the len is {len} but the index is {index}");
-            })
+            .expect("IndexMap: index out of bounds")
             .1
     }
 }

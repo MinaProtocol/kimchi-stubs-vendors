@@ -1,4 +1,4 @@
-// We *mostly* avoid unsafe code, but `Slice` allows it for DST casting.
+// We *mostly* avoid unsafe code, but `map::core::raw` allows it to use `RawTable` buckets.
 #![deny(unsafe_code)]
 #![warn(rust_2018_idioms)]
 #![no_std]
@@ -19,7 +19,7 @@
 //! - The [`Equivalent`] trait, which offers more flexible equality definitions
 //!   between borrowed and owned versions of keys.
 //! - The [`MutableKeys`][map::MutableKeys] trait, which gives opt-in mutable
-//!   access to map keys, and [`MutableValues`][set::MutableValues] for sets.
+//!   access to hash map keys.
 //!
 //! ### Feature Flags
 //!
@@ -35,12 +35,6 @@
 //!   to [`IndexMap`] and [`IndexSet`]. Alternative implementations for
 //!   (de)serializing [`IndexMap`] as an ordered sequence are available in the
 //!   [`map::serde_seq`] module.
-//! * `borsh`: Adds implementations for [`BorshSerialize`] and [`BorshDeserialize`]
-//!   to [`IndexMap`] and [`IndexSet`]. **Note:** When this feature is enabled,
-//!   you cannot enable the `derive` feature of [`borsh`] due to a cyclic
-//!   dependency. Instead, add the `borsh-derive` crate as an explicit
-//!   dependency in your Cargo.toml and import as e.g.
-//!   `use borsh_derive::{BorshSerialize, BorshDeserialize};`.
 //! * `arbitrary`: Adds implementations for the [`arbitrary::Arbitrary`] trait
 //!   to [`IndexMap`] and [`IndexSet`].
 //! * `quickcheck`: Adds implementations for the [`quickcheck::Arbitrary`] trait
@@ -52,9 +46,6 @@
 //! [`no_std`]: #no-standard-library-targets
 //! [`Serialize`]: `::serde::Serialize`
 //! [`Deserialize`]: `::serde::Deserialize`
-//! [`BorshSerialize`]: `::borsh::BorshSerialize`
-//! [`BorshDeserialize`]: `::borsh::BorshDeserialize`
-//! [`borsh`]: `::borsh`
 //! [`arbitrary::Arbitrary`]: `::arbitrary::Arbitrary`
 //! [`quickcheck::Arbitrary`]: `::quickcheck::Arbitrary`
 //!
@@ -68,14 +59,20 @@
 //!
 //! ```
 //! use fnv::FnvBuildHasher;
+//! use fxhash::FxBuildHasher;
 //! use indexmap::{IndexMap, IndexSet};
 //!
 //! type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
 //! type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
 //!
+//! type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+//! type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
+//!
 //! let std: IndexSet<i32> = (0..100).collect();
 //! let fnv: FnvIndexSet<i32> = (0..100).collect();
+//! let fx: FxIndexSet<i32> = (0..100).collect();
 //! assert_eq!(std, fnv);
+//! assert_eq!(std, fx);
 //! ```
 //!
 //! ### Rust Version
@@ -93,13 +90,12 @@
 //! `default-features = false` to your dependency specification.
 //!
 //! - Creating maps and sets using [`new`][IndexMap::new] and
-//!   [`with_capacity`][IndexMap::with_capacity] is unavailable without `std`.
+//! [`with_capacity`][IndexMap::with_capacity] is unavailable without `std`.
 //!   Use methods [`IndexMap::default`], [`with_hasher`][IndexMap::with_hasher],
 //!   [`with_capacity_and_hasher`][IndexMap::with_capacity_and_hasher] instead.
 //!   A no-std compatible hasher will be needed as well, for example
 //!   from the crate `twox-hash`.
-//! - Macros [`indexmap!`] and [`indexset!`] are unavailable without `std`. Use
-//!   the macros [`indexmap_with_default!`] and [`indexset_with_default!`] instead.
+//! - Macros [`indexmap!`] and [`indexset!`] are unavailable without `std`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -114,8 +110,7 @@ use alloc::vec::{self, Vec};
 mod arbitrary;
 #[macro_use]
 mod macros;
-#[cfg(feature = "borsh")]
-mod borsh;
+mod mutable_keys;
 #[cfg(feature = "serde")]
 mod serde;
 mod util;
@@ -127,6 +122,9 @@ pub mod set;
 // are documented after the "normal" methods.
 #[cfg(feature = "rayon")]
 mod rayon;
+
+#[cfg(feature = "rustc-rayon")]
+mod rustc;
 
 pub use crate::map::IndexMap;
 pub use crate::set::IndexSet;

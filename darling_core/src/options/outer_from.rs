@@ -1,13 +1,9 @@
 use syn::spanned::Spanned;
 use syn::{Field, Ident, Meta};
 
-use crate::ast::Data;
-use crate::codegen::ForwardAttrs;
-use crate::options::{
-    Core, DefaultExpression, ForwardAttrsFilter, ForwardedField, ParseAttribute, ParseData,
-};
+use crate::options::{Core, DefaultExpression, ForwardAttrs, ParseAttribute, ParseData};
 use crate::util::PathList;
-use crate::{Error, FromField, FromMeta, Result};
+use crate::{FromMeta, Result};
 
 /// Reusable base for `FromDeriveInput`, `FromVariant`, `FromField`, and other top-level
 /// `From*` traits.
@@ -17,7 +13,7 @@ pub struct OuterFrom {
     pub ident: Option<Ident>,
 
     /// The field on the target struct which should receive the type attributes, if any.
-    pub attrs: Option<ForwardedField>,
+    pub attrs: Option<Ident>,
 
     pub container: Core,
 
@@ -26,7 +22,7 @@ pub struct OuterFrom {
 
     /// The attribute names that should be forwarded. The presence of the word with no additional
     /// filtering will cause _all_ attributes to be cloned and exposed to the struct after parsing.
-    pub forward_attrs: Option<ForwardAttrsFilter>,
+    pub forward_attrs: Option<ForwardAttrs>,
 
     /// Whether or not the container can be made through conversion from the type `Ident`.
     pub from_ident: bool,
@@ -42,13 +38,6 @@ impl OuterFrom {
             forward_attrs: Default::default(),
             from_ident: Default::default(),
         })
-    }
-
-    pub fn as_forward_attrs(&self) -> ForwardAttrs<'_> {
-        ForwardAttrs {
-            field: self.attrs.as_ref(),
-            filter: self.forward_attrs.as_ref(),
-        }
     }
 }
 
@@ -79,33 +68,14 @@ impl ParseData for OuterFrom {
     fn parse_field(&mut self, field: &Field) -> Result<()> {
         match field.ident.as_ref().map(|v| v.to_string()).as_deref() {
             Some("ident") => {
-                self.ident.clone_from(&field.ident);
+                self.ident = field.ident.clone();
                 Ok(())
             }
             Some("attrs") => {
-                self.attrs = ForwardedField::from_field(field).map(Some)?;
+                self.attrs = field.ident.clone();
                 Ok(())
             }
             _ => self.container.parse_field(field),
-        }
-    }
-
-    fn validate_body(&self, errors: &mut crate::error::Accumulator) {
-        self.container.validate_body(errors);
-        if let Some(attrs) = &self.attrs {
-            if self.forward_attrs.is_none() {
-                let container_name = match &self.container.data {
-                    Data::Enum(_) => "enum",
-                    Data::Struct(_) => "struct",
-                };
-                errors.push(
-                    Error::custom(format!(
-                        "field will not be populated because `forward_attrs` is not set on the {}",
-                        container_name
-                    ))
-                    .with_span(&attrs.ident),
-                );
-            }
         }
     }
 }

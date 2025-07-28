@@ -158,7 +158,7 @@ impl<E: Display> Display for AllocOrInitError<E> {
 /// ### Fallible Allocation: The `try_alloc_` Method Prefix
 ///
 /// These allocation methods let you recover from out-of-memory (OOM)
-/// scenarios, rather than raising a panic on OOM.
+/// scenarioes, rather than raising a panic on OOM.
 ///
 /// ```
 /// use bumpalo::Bump;
@@ -407,15 +407,6 @@ unsafe fn dealloc_chunk_list(mut footer: NonNull<ChunkFooter>) {
 unsafe impl Send for Bump {}
 
 #[inline]
-fn is_pointer_aligned_to<T>(pointer: *mut T, align: usize) -> bool {
-    debug_assert!(align.is_power_of_two());
-
-    let pointer = pointer as usize;
-    let pointer_aligned = round_down_to(pointer, align);
-    pointer == pointer_aligned
-}
-
-#[inline]
 pub(crate) fn round_up_to(n: usize, divisor: usize) -> Option<usize> {
     debug_assert!(divisor > 0);
     debug_assert!(divisor.is_power_of_two());
@@ -427,14 +418,6 @@ pub(crate) fn round_down_to(n: usize, divisor: usize) -> usize {
     debug_assert!(divisor > 0);
     debug_assert!(divisor.is_power_of_two());
     n & !(divisor - 1)
-}
-
-/// Same as `round_down_to` but preserves pointer provenance.
-#[inline]
-pub(crate) fn round_mut_ptr_down_to(ptr: *mut u8, divisor: usize) -> *mut u8 {
-    debug_assert!(divisor > 0);
-    debug_assert!(divisor.is_power_of_two());
-    ptr.wrapping_sub(ptr as usize & (divisor - 1))
 }
 
 // After this point, we try to hit page boundaries instead of powers of 2
@@ -597,7 +580,7 @@ impl Bump {
     /// assert!(bump.try_alloc(5).is_err());
     /// ```
     pub fn set_allocation_limit(&self, limit: Option<usize>) {
-        self.allocation_limit.set(limit);
+        self.allocation_limit.set(limit)
     }
 
     /// How much headroom an arena has before it hits its allocation
@@ -809,6 +792,7 @@ impl Bump {
     /// assert_eq!(*x, "hello");
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc<T>(&self, val: T) -> &mut T {
         self.alloc_with(|| val)
     }
@@ -828,6 +812,7 @@ impl Bump {
     /// assert_eq!(x, Ok(&mut "hello"));
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn try_alloc<T>(&self, val: T) -> Result<&mut T, AllocErr> {
         self.try_alloc_with(|| val)
     }
@@ -852,6 +837,7 @@ impl Bump {
     /// assert_eq!(*x, "hello");
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_with<F, T>(&self, f: F) -> &mut T
     where
         F: FnOnce() -> T,
@@ -871,7 +857,7 @@ impl Bump {
             // directly into the heap instead. It seems we get it to realize
             // this most consistently if we put this critical line into it's
             // own function instead of inlining it into the surrounding code.
-            ptr::write(ptr, f());
+            ptr::write(ptr, f())
         }
 
         let layout = Layout::new::<T>();
@@ -904,6 +890,7 @@ impl Bump {
     /// assert_eq!(x, Ok(&mut "hello"));
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn try_alloc_with<F, T>(&self, f: F) -> Result<&mut T, AllocErr>
     where
         F: FnOnce() -> T,
@@ -923,7 +910,7 @@ impl Bump {
             // directly into the heap instead. It seems we get it to realize
             // this most consistently if we put this critical line into it's
             // own function instead of inlining it into the surrounding code.
-            ptr::write(ptr, f());
+            ptr::write(ptr, f())
         }
 
         //SAFETY: Self-contained:
@@ -975,6 +962,7 @@ impl Bump {
     /// # Result::<_, ()>::Ok(())
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_try_with<F, T, E>(&self, f: F) -> Result<&mut T, E>
     where
         F: FnOnce() -> Result<T, E>,
@@ -1083,6 +1071,7 @@ impl Bump {
     /// # Result::<_, bumpalo::AllocOrInitError<()>>::Ok(())
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn try_alloc_try_with<F, T, E>(&self, f: F) -> Result<&mut T, AllocOrInitError<E>>
     where
         F: FnOnce() -> Result<T, E>,
@@ -1167,6 +1156,7 @@ impl Bump {
     /// assert_eq!(x, &[1, 2, 3]);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_copy<T>(&self, src: &[T]) -> &mut [T]
     where
         T: Copy,
@@ -1178,35 +1168,6 @@ impl Bump {
             ptr::copy_nonoverlapping(src.as_ptr(), dst.as_ptr(), src.len());
             slice::from_raw_parts_mut(dst.as_ptr(), src.len())
         }
-    }
-
-    /// Like `alloc_slice_copy`, but does not panic in case of allocation failure.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// let bump = bumpalo::Bump::new();
-    /// let x = bump.try_alloc_slice_copy(&[1, 2, 3]);
-    /// assert_eq!(x, Ok(&mut[1, 2, 3] as &mut [_]));
-    ///
-    ///
-    /// let bump = bumpalo::Bump::new();
-    /// bump.set_allocation_limit(Some(4));
-    /// let x = bump.try_alloc_slice_copy(&[1, 2, 3, 4, 5, 6]);
-    /// assert_eq!(x, Err(bumpalo::AllocErr)); // too big
-    /// ```
-    #[inline(always)]
-    pub fn try_alloc_slice_copy<T>(&self, src: &[T]) -> Result<&mut [T], AllocErr>
-    where
-        T: Copy,
-    {
-        let layout = Layout::for_value(src);
-        let dst = self.try_alloc_layout(layout)?.cast::<T>();
-        let result = unsafe {
-            core::ptr::copy_nonoverlapping(src.as_ptr(), dst.as_ptr(), src.len());
-            slice::from_raw_parts_mut(dst.as_ptr(), src.len())
-        };
-        Ok(result)
     }
 
     /// `Clone` a slice into this `Bump` and return an exclusive reference to
@@ -1235,6 +1196,7 @@ impl Bump {
     /// assert_eq!(originals, clones);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_clone<T>(&self, src: &[T]) -> &mut [T]
     where
         T: Clone,
@@ -1248,24 +1210,6 @@ impl Bump {
             }
 
             slice::from_raw_parts_mut(dst.as_ptr(), src.len())
-        }
-    }
-
-    /// Like `alloc_slice_clone` but does not panic on failure.
-    #[inline(always)]
-    pub fn try_alloc_slice_clone<T>(&self, src: &[T]) -> Result<&mut [T], AllocErr>
-    where
-        T: Clone,
-    {
-        let layout = Layout::for_value(src);
-        let dst = self.try_alloc_layout(layout)?.cast::<T>();
-
-        unsafe {
-            for (i, val) in src.iter().cloned().enumerate() {
-                ptr::write(dst.as_ptr().add(i), val);
-            }
-
-            Ok(slice::from_raw_parts_mut(dst.as_ptr(), src.len()))
         }
     }
 
@@ -1283,35 +1227,12 @@ impl Bump {
     /// assert_eq!("hello world", hello);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_str(&self, src: &str) -> &mut str {
         let buffer = self.alloc_slice_copy(src.as_bytes());
         unsafe {
             // This is OK, because it already came in as str, so it is guaranteed to be utf8
             str::from_utf8_unchecked_mut(buffer)
-        }
-    }
-
-    /// Same as `alloc_str` but does not panic on failure.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// let bump = bumpalo::Bump::new();
-    /// let hello = bump.try_alloc_str("hello world").unwrap();
-    /// assert_eq!("hello world", hello);
-    ///
-    ///
-    /// let bump = bumpalo::Bump::new();
-    /// bump.set_allocation_limit(Some(5));
-    /// let hello = bump.try_alloc_str("hello world");
-    /// assert_eq!(Err(bumpalo::AllocErr), hello);
-    /// ```
-    #[inline(always)]
-    pub fn try_alloc_str(&self, src: &str) -> Result<&mut str, AllocErr> {
-        let buffer = self.try_alloc_slice_copy(src.as_bytes())?;
-        unsafe {
-            // This is OK, because it already came in as str, so it is guaranteed to be utf8
-            Ok(str::from_utf8_unchecked_mut(buffer))
         }
     }
 
@@ -1333,6 +1254,7 @@ impl Bump {
     /// assert_eq!(x, &[5, 10, 15, 20, 25]);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_fill_with<T, F>(&self, len: usize, mut f: F) -> &mut [T]
     where
         F: FnMut(usize) -> T,
@@ -1354,48 +1276,6 @@ impl Bump {
     /// Allocates a new slice of size `len` into this `Bump` and returns an
     /// exclusive reference to the copy.
     ///
-    /// The elements of the slice are initialized using the supplied closure.
-    /// The closure argument is the position in the slice.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// let bump = bumpalo::Bump::new();
-    /// let x = bump.try_alloc_slice_fill_with(5, |i| 5 * (i + 1));
-    /// assert_eq!(x, Ok(&mut[5usize, 10, 15, 20, 25] as &mut [_]));
-    ///
-    ///
-    /// let bump = bumpalo::Bump::new();
-    /// bump.set_allocation_limit(Some(4));
-    /// let x = bump.try_alloc_slice_fill_with(10, |i| 5 * (i + 1));
-    /// assert_eq!(x, Err(bumpalo::AllocErr));
-    /// ```
-    #[inline(always)]
-    pub fn try_alloc_slice_fill_with<T, F>(
-        &self,
-        len: usize,
-        mut f: F,
-    ) -> Result<&mut [T], AllocErr>
-    where
-        F: FnMut(usize) -> T,
-    {
-        let layout = Layout::array::<T>(len).map_err(|_| AllocErr)?;
-        let dst = self.try_alloc_layout(layout)?.cast::<T>();
-
-        unsafe {
-            for i in 0..len {
-                ptr::write(dst.as_ptr().add(i), f(i));
-            }
-
-            let result = slice::from_raw_parts_mut(dst.as_ptr(), len);
-            debug_assert_eq!(Layout::for_value(result), layout);
-            Ok(result)
-        }
-    }
-
-    /// Allocates a new slice of size `len` into this `Bump` and returns an
-    /// exclusive reference to the copy.
-    ///
     /// All elements of the slice are initialized to `value`.
     ///
     /// ## Panics
@@ -1410,18 +1290,9 @@ impl Bump {
     /// assert_eq!(x, &[42, 42, 42, 42, 42]);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_fill_copy<T: Copy>(&self, len: usize, value: T) -> &mut [T] {
         self.alloc_slice_fill_with(len, |_| value)
-    }
-
-    /// Same as `alloc_slice_fill_copy` but does not panic on failure.
-    #[inline(always)]
-    pub fn try_alloc_slice_fill_copy<T: Copy>(
-        &self,
-        len: usize,
-        value: T,
-    ) -> Result<&mut [T], AllocErr> {
-        self.try_alloc_slice_fill_with(len, |_| value)
     }
 
     /// Allocates a new slice of size `len` slice into this `Bump` and return an
@@ -1444,18 +1315,9 @@ impl Bump {
     /// assert_eq!(&x[1], &s);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_fill_clone<T: Clone>(&self, len: usize, value: &T) -> &mut [T] {
         self.alloc_slice_fill_with(len, |_| value.clone())
-    }
-
-    /// Like `alloc_slice_fill_clone` but does not panic on failure.
-    #[inline(always)]
-    pub fn try_alloc_slice_fill_clone<T: Clone>(
-        &self,
-        len: usize,
-        value: &T,
-    ) -> Result<&mut [T], AllocErr> {
-        self.try_alloc_slice_fill_with(len, |_| value.clone())
     }
 
     /// Allocates a new slice of size `len` slice into this `Bump` and return an
@@ -1476,6 +1338,7 @@ impl Bump {
     /// assert_eq!(x, [4, 9, 25]);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_fill_iter<T, I>(&self, iter: I) -> &mut [T]
     where
         I: IntoIterator<Item = T>,
@@ -1483,31 +1346,6 @@ impl Bump {
     {
         let mut iter = iter.into_iter();
         self.alloc_slice_fill_with(iter.len(), |_| {
-            iter.next().expect("Iterator supplied too few elements")
-        })
-    }
-
-    /// Allocates a new slice of size `iter.len()` slice into this `Bump` and return an
-    /// exclusive reference to the copy. Does not panic on failure.
-    ///
-    /// The elements are initialized using the supplied iterator.
-    ///
-    /// ## Example
-    ///
-    /// ```
-    /// let bump = bumpalo::Bump::new();
-    /// let x: &[i32] = bump.try_alloc_slice_fill_iter([2, 3, 5]
-    ///     .iter().cloned().map(|i| i * i)).unwrap();
-    /// assert_eq!(x, [4, 9, 25]);
-    /// ```
-    #[inline(always)]
-    pub fn try_alloc_slice_fill_iter<T, I>(&self, iter: I) -> Result<&mut [T], AllocErr>
-    where
-        I: IntoIterator<Item = T>,
-        I::IntoIter: ExactSizeIterator,
-    {
-        let mut iter = iter.into_iter();
-        self.try_alloc_slice_fill_with(iter.len(), |_| {
             iter.next().expect("Iterator supplied too few elements")
         })
     }
@@ -1531,17 +1369,9 @@ impl Bump {
     /// assert_eq!(x, &[0, 0, 0, 0, 0]);
     /// ```
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
     pub fn alloc_slice_fill_default<T: Default>(&self, len: usize) -> &mut [T] {
         self.alloc_slice_fill_with(len, |_| T::default())
-    }
-
-    /// Like `alloc_slice_fill_default` but does not panic on failure.
-    #[inline(always)]
-    pub fn try_alloc_slice_fill_default<T: Default>(
-        &self,
-        len: usize,
-    ) -> Result<&mut [T], AllocErr> {
-        self.try_alloc_slice_fill_with(len, |_| T::default())
     }
 
     /// Allocate space for an object with the given `Layout`.
@@ -1596,7 +1426,8 @@ impl Bump {
             }
 
             let ptr = ptr.wrapping_sub(layout.size());
-            let aligned_ptr = round_mut_ptr_down_to(ptr, layout.align());
+            let rem = ptr as usize % layout.align();
+            let aligned_ptr = ptr.wrapping_sub(rem);
 
             if aligned_ptr >= start {
                 let aligned_ptr = NonNull::new_unchecked(aligned_ptr);
@@ -1691,7 +1522,7 @@ impl Bump {
             // at least the requested size.
             let mut ptr = new_footer.ptr.get().as_ptr().sub(size);
             // Round the pointer down to the requested alignment.
-            ptr = round_mut_ptr_down_to(ptr, layout.align());
+            ptr = ptr.sub(ptr as usize % layout.align());
             debug_assert!(
                 ptr as *const _ <= new_footer,
                 "{:p} <= {:p}",
@@ -1872,7 +1703,6 @@ impl Bump {
         // If the pointer is the last allocation we made, we can reuse the bytes,
         // otherwise they are simply leaked -- at least until somebody calls reset().
         if self.is_last_allocation(ptr) {
-            let ptr = self.current_chunk_footer.get().as_ref().ptr.get();
             let ptr = NonNull::new_unchecked(ptr.as_ptr().add(layout.size()));
             self.current_chunk_footer.get().as_ref().ptr.set(ptr);
         }
@@ -1885,31 +1715,13 @@ impl Bump {
         old_layout: Layout,
         new_layout: Layout,
     ) -> Result<NonNull<u8>, AllocErr> {
-        // If the new layout demands greater alignment than the old layout has,
-        // then either
-        //
-        // 1. the pointer happens to satisfy the new layout's alignment, so we
-        //    got lucky and can return the pointer as-is, or
-        //
-        // 2. the pointer is not aligned to the new layout's demanded alignment,
-        //    and we are unlucky.
-        //
-        // In the case of (2), to successfully "shrink" the allocation, we would
-        // have to allocate a whole new region for the new layout, without being
-        // able to free the old region. That is unacceptable, so simply return
-        // an allocation failure error instead.
-        if old_layout.align() < new_layout.align() {
-            if is_pointer_aligned_to(ptr.as_ptr(), new_layout.align()) {
-                return Ok(ptr);
-            } else {
-                return Err(AllocErr);
-            }
-        }
-
-        debug_assert!(is_pointer_aligned_to(ptr.as_ptr(), new_layout.align()));
-
         let old_size = old_layout.size();
         let new_size = new_layout.size();
+        let align_is_compatible = old_layout.align() >= new_layout.align();
+
+        if !align_is_compatible {
+            return Err(AllocErr);
+        }
 
         // This is how much space we would *actually* reclaim while satisfying
         // the requested alignment.
@@ -1919,32 +1731,7 @@ impl Bump {
                 // Only reclaim the excess space (which requires a copy) if it
                 // is worth it: we are actually going to recover "enough" space
                 // and we can do a non-overlapping copy.
-                //
-                // We do `(old_size + 1) / 2` so division rounds up rather than
-                // down. Consider when:
-                //
-                //     old_size = 5
-                //     new_size = 3
-                //
-                // If we do not take care to round up, this will result in:
-                //
-                //     delta = 2
-                //     (old_size / 2) = (5 / 2) = 2
-                //
-                // And the the check will succeed even though we are have
-                // overlapping ranges:
-                //
-                //     |--------old-allocation-------|
-                //     |------from-------|
-                //                 |-------to--------|
-                //     +-----+-----+-----+-----+-----+
-                //     |  a  |  b  |  c  |  .  |  .  |
-                //     +-----+-----+-----+-----+-----+
-                //
-                // But we MUST NOT have overlapping ranges because we use
-                // `copy_nonoverlapping` below! Therefore, we round the division
-                // up to avoid this issue.
-                && delta >= (old_size + 1) / 2
+                && delta >= old_size / 2
         {
             let footer = self.current_chunk_footer.get();
             let footer = footer.as_ref();
@@ -1958,12 +1745,10 @@ impl Bump {
             // in the `if` condition.
             ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.as_ptr(), new_size);
 
-            return Ok(new_ptr);
+            Ok(new_ptr)
+        } else {
+            Ok(ptr)
         }
-
-        // If this wasn't the last allocation, or shrinking wasn't worth it,
-        // simply return the old pointer as-is.
-        Ok(ptr)
     }
 
     #[inline]
@@ -2077,7 +1862,7 @@ unsafe impl<'a> alloc::Alloc for &'a Bump {
 
     #[inline]
     unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
-        Bump::dealloc(self, ptr, layout);
+        Bump::dealloc(self, ptr, layout)
     }
 
     #[inline]
@@ -2104,7 +1889,6 @@ unsafe impl<'a> alloc::Alloc for &'a Bump {
 
 #[cfg(any(feature = "allocator_api", feature = "allocator-api2"))]
 unsafe impl<'a> Allocator for &'a Bump {
-    #[inline]
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         self.try_alloc_layout(layout)
             .map(|p| unsafe {
@@ -2113,12 +1897,10 @@ unsafe impl<'a> Allocator for &'a Bump {
             .map_err(|_| AllocError)
     }
 
-    #[inline]
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         Bump::dealloc(self, ptr, layout)
     }
 
-    #[inline]
     unsafe fn shrink(
         &self,
         ptr: NonNull<u8>,
@@ -2132,7 +1914,6 @@ unsafe impl<'a> Allocator for &'a Bump {
             .map_err(|_| AllocError)
     }
 
-    #[inline]
     unsafe fn grow(
         &self,
         ptr: NonNull<u8>,
@@ -2146,7 +1927,6 @@ unsafe impl<'a> Allocator for &'a Bump {
             .map_err(|_| AllocError)
     }
 
-    #[inline]
     unsafe fn grow_zeroed(
         &self,
         ptr: NonNull<u8>,
@@ -2174,6 +1954,7 @@ mod tests {
 
     // Uses private `alloc` module.
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn test_realloc() {
         use crate::alloc::Alloc;
 

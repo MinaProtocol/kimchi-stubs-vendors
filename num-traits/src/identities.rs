@@ -28,13 +28,6 @@ pub trait Zero: Sized + Add<Self, Output = Self> {
     fn is_zero(&self) -> bool;
 }
 
-/// Defines an associated constant representing the additive identity element
-/// for `Self`.
-pub trait ConstZero: Zero {
-    /// The additive identity element of `Self`, `0`.
-    const ZERO: Self;
-}
-
 macro_rules! zero_impl {
     ($t:ty, $v:expr) => {
         impl Zero for $t {
@@ -46,10 +39,6 @@ macro_rules! zero_impl {
             fn is_zero(&self) -> bool {
                 *self == $v
             }
-        }
-
-        impl ConstZero for $t {
-            const ZERO: Self = $v;
         }
     };
 }
@@ -86,13 +75,6 @@ where
     fn zero() -> Self {
         Wrapping(T::zero())
     }
-}
-
-impl<T: ConstZero> ConstZero for Wrapping<T>
-where
-    Wrapping<T>: Add<Output = Wrapping<T>>,
-{
-    const ZERO: Self = Wrapping(T::ZERO);
 }
 
 /// Defines a multiplicative identity element for `Self`.
@@ -133,13 +115,6 @@ pub trait One: Sized + Mul<Self, Output = Self> {
     }
 }
 
-/// Defines an associated constant representing the multiplicative identity
-/// element for `Self`.
-pub trait ConstOne: One {
-    /// The multiplicative identity element of `Self`, `1`.
-    const ONE: Self;
-}
-
 macro_rules! one_impl {
     ($t:ty, $v:expr) => {
         impl One for $t {
@@ -151,10 +126,6 @@ macro_rules! one_impl {
             fn is_one(&self) -> bool {
                 *self == $v
             }
-        }
-
-        impl ConstOne for $t {
-            const ONE: Self = $v;
         }
     };
 }
@@ -187,13 +158,6 @@ where
     fn one() -> Self {
         Wrapping(T::one())
     }
-}
-
-impl<T: ConstOne> ConstOne for Wrapping<T>
-where
-    Wrapping<T>: Mul<Output = Wrapping<T>>,
-{
-    const ONE: Self = Wrapping(T::ONE);
 }
 
 // Some helper functions provided for backwards compatibility.

@@ -1,38 +1,16 @@
-use std::borrow::Cow;
-
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens};
-use syn::spanned::Spanned;
+use quote::{quote, ToTokens};
 
 use crate::ast::{Data, Fields, Style};
 use crate::codegen::{Field, OuterFromImpl, TraitImpl, Variant};
-use crate::util::Callable;
 
 pub struct FromMetaImpl<'a> {
     pub base: TraitImpl<'a>,
-    pub from_word: Option<Cow<'a, Callable>>,
-    pub from_none: Option<&'a Callable>,
 }
 
-impl ToTokens for FromMetaImpl<'_> {
+impl<'a> ToTokens for FromMetaImpl<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let base = &self.base;
-
-        let from_word = self.from_word.as_ref().map(|body| {
-            quote_spanned! {body.span()=>
-                fn from_word() -> ::darling::Result<Self> {
-                    ::darling::export::identity::<fn() -> ::darling::Result<Self>>(#body)()
-                }
-            }
-        });
-
-        let from_none = self.from_none.map(|body| {
-            quote_spanned! {body.span()=>
-                fn from_none() -> ::darling::export::Option<Self> {
-                    ::darling::export::identity::<fn() -> ::darling::export::Option<Self>>(#body)()
-                }
-            }
-        });
 
         let impl_block = match base.data {
             // Unit structs allow empty bodies only.
@@ -77,10 +55,6 @@ impl ToTokens for FromMetaImpl<'_> {
                 let post_transform = base.post_transform_call();
 
                 quote!(
-                    #from_word
-
-                    #from_none
-
                     fn from_list(__items: &[::darling::export::NestedMeta]) -> ::darling::Result<Self> {
 
                         #decls
@@ -115,7 +89,22 @@ impl ToTokens for FromMetaImpl<'_> {
                     }
                 };
 
-                let data_variants = variants.iter().map(Variant::as_data_match_arm);
+                let word_or_err = variants
+                    .iter()
+                    .find_map(|variant| {
+                        if variant.word {
+                            let ty_ident = variant.ty_ident;
+                            let variant_ident = variant.variant_ident;
+                            Some(quote!(::darling::export::Ok(#ty_ident::#variant_ident)))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        quote!(::darling::export::Err(
+                            ::darling::Error::unsupported_format("word")
+                        ))
+                    });
 
                 quote!(
                     fn from_list(__outer: &[::darling::export::NestedMeta]) -> ::darling::Result<Self> {
@@ -126,7 +115,7 @@ impl ToTokens for FromMetaImpl<'_> {
                             1 => {
                                 if let ::darling::export::NestedMeta::Meta(ref __nested) = __outer[0] {
                                     match ::darling::util::path_to_string(__nested.path()).as_ref() {
-                                        #(#data_variants)*
+                                        #(#variants)*
                                         __other => ::darling::export::Err(::darling::Error::#unknown_variant_err.with_span(__nested))
                                     }
                                 } else {
@@ -144,9 +133,9 @@ impl ToTokens for FromMetaImpl<'_> {
                         }
                     }
 
-                    #from_word
-
-                    #from_none
+                    fn from_word() -> ::darling::Result<Self> {
+                        #word_or_err
+                    }
                 )
             }
         };

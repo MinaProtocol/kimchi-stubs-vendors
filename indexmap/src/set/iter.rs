@@ -88,7 +88,6 @@ impl<T> Default for Iter<'_, T> {
 ///
 /// This `struct` is created by the [`IndexSet::into_iter`] method
 /// (provided by the [`IntoIterator`] trait). See its documentation for more.
-#[derive(Clone)]
 pub struct IntoIter<T> {
     iter: vec::IntoIter<Bucket<T>>,
 }
@@ -542,7 +541,6 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
-    #[track_caller]
     pub(super) fn new<R>(set: &'a mut IndexSet<T, S>, range: R, replace_with: I) -> Self
     where
         R: RangeBounds<usize>,
@@ -610,7 +608,7 @@ impl<I: Iterator> Iterator for UnitValue<I> {
     }
 }
 
-impl<I, T, S> fmt::Debug for Splice<'_, I, T, S>
+impl<'a, I, T, S> fmt::Debug for Splice<'a, I, T, S>
 where
     I: fmt::Debug + Iterator<Item = T>,
     T: fmt::Debug + Hash + Eq,

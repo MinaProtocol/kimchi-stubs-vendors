@@ -18,7 +18,7 @@ mod fwd {
 
     // Describe a parsed part of source string as described in this table:
     // https://unicode.org/reports/tr29/#Default_Sentence_Boundaries
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     enum StatePart {
         Sot,
         Eot,
@@ -33,7 +33,7 @@ mod fwd {
         STerm,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Clone, PartialEq, Eq)]
     struct SentenceBreaksState(pub [StatePart; 4]);
 
     const INITIAL_STATE: SentenceBreaksState = SentenceBreaksState([
@@ -43,7 +43,7 @@ mod fwd {
         StatePart::Sot,
     ]);
 
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub struct SentenceBreaks<'a> {
         pub string: &'a str,
         pos: usize,
@@ -264,7 +264,9 @@ mod fwd {
             }
 
             // SB2 https://unicode.org/reports/tr29/#SB2
-            if self.state.match1(StatePart::Sot) || self.state.match1(StatePart::Eot) {
+            if self.state.match1(StatePart::Sot) {
+                None
+            } else if self.state.match1(StatePart::Eot) {
                 None
             } else {
                 self.state = self.state.end();
@@ -273,7 +275,7 @@ mod fwd {
         }
     }
 
-    pub fn new_sentence_breaks(source: &str) -> SentenceBreaks<'_> {
+    pub fn new_sentence_breaks<'a>(source: &'a str) -> SentenceBreaks<'a> {
         SentenceBreaks {
             string: source,
             pos: 0,
@@ -294,7 +296,7 @@ mod fwd {
 ///
 /// [`unicode_sentences`]: trait.UnicodeSegmentation.html#tymethod.unicode_sentences
 /// [`UnicodeSegmentation`]: trait.UnicodeSegmentation.html
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct UnicodeSentences<'a> {
     inner: Filter<USentenceBounds<'a>, fn(&&str) -> bool>,
 }
@@ -307,7 +309,7 @@ pub struct UnicodeSentences<'a> {
 ///
 /// [`split_sentence_bounds`]: trait.UnicodeSegmentation.html#tymethod.split_sentence_bounds
 /// [`UnicodeSegmentation`]: trait.UnicodeSegmentation.html
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct USentenceBounds<'a> {
     iter: fwd::SentenceBreaks<'a>,
     sentence_start: Option<usize>,
@@ -320,14 +322,14 @@ pub struct USentenceBounds<'a> {
 ///
 /// [`split_sentence_bound_indices`]: trait.UnicodeSegmentation.html#tymethod.split_sentence_bound_indices
 /// [`UnicodeSegmentation`]: trait.UnicodeSegmentation.html
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct USentenceBoundIndices<'a> {
     start_offset: usize,
     iter: USentenceBounds<'a>,
 }
 
 #[inline]
-pub fn new_sentence_bounds(source: &str) -> USentenceBounds<'_> {
+pub fn new_sentence_bounds<'a>(source: &'a str) -> USentenceBounds<'a> {
     USentenceBounds {
         iter: fwd::new_sentence_breaks(source),
         sentence_start: None,
@@ -335,7 +337,7 @@ pub fn new_sentence_bounds(source: &str) -> USentenceBounds<'_> {
 }
 
 #[inline]
-pub fn new_sentence_bound_indices(source: &str) -> USentenceBoundIndices<'_> {
+pub fn new_sentence_bound_indices<'a>(source: &'a str) -> USentenceBoundIndices<'a> {
     USentenceBoundIndices {
         start_offset: source.as_ptr() as usize,
         iter: new_sentence_bounds(source),
@@ -343,12 +345,12 @@ pub fn new_sentence_bound_indices(source: &str) -> USentenceBoundIndices<'_> {
 }
 
 #[inline]
-pub fn new_unicode_sentences(s: &str) -> UnicodeSentences<'_> {
+pub fn new_unicode_sentences<'b>(s: &'b str) -> UnicodeSentences<'b> {
     use super::UnicodeSegmentation;
     use crate::tables::util::is_alphanumeric;
 
     fn has_alphanumeric(s: &&str) -> bool {
-        s.chars().any(is_alphanumeric)
+        s.chars().any(|c| is_alphanumeric(c))
     }
     let has_alphanumeric: fn(&&str) -> bool = has_alphanumeric; // coerce to fn pointer
 
@@ -364,11 +366,6 @@ impl<'a> Iterator for UnicodeSentences<'a> {
     fn next(&mut self) -> Option<&'a str> {
         self.inner.next()
     }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
 }
 
 impl<'a> Iterator for USentenceBounds<'a> {
@@ -382,7 +379,7 @@ impl<'a> Iterator for USentenceBounds<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<&'a str> {
-        if self.sentence_start.is_none() {
+        if self.sentence_start == None {
             if let Some(start_pos) = self.iter.next() {
                 self.sentence_start = Some(start_pos)
             } else {

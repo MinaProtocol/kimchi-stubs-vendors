@@ -10,18 +10,11 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.61"
+edition = "2018"
 name = "ppv-lite86"
-version = "0.2.21"
+version = "0.2.17"
 authors = ["The CryptoCorrosion Contributors"]
-build = false
-autobins = false
-autoexamples = false
-autotests = false
-autobenches = false
-description = "Cross-platform cryptography-oriented low-level SIMD library."
-readme = false
+description = "Implementation of the crypto-simd API for x86"
 keywords = [
     "crypto",
     "simd",
@@ -31,16 +24,10 @@ categories = [
     "cryptography",
     "no-std",
 ]
-license = "MIT OR Apache-2.0"
+license = "MIT/Apache-2.0"
 repository = "https://github.com/cryptocorrosion/cryptocorrosion"
 
-[lib]
-name = "ppv_lite86"
-path = "src/lib.rs"
-
-[dependencies.zerocopy]
-version = "0.8.23"
-features = ["simd"]
+[dependencies]
 
 [features]
 default = ["std"]

@@ -1,0 +1,13 @@
+[metadata]
+name = "Cargo-specification"
+description = "This specification describes how the command-line utility cargo-specification works."
+version = "0.1.0"
+authors = ["David Wong"]
+
+[config]
+template = "spec/template.md"
+
+[sections]
+build = "@/src/build.rs"
+toml_parser = "@/src/toml_parser.rs"
+parser = "@/src/comment_parser.rs"

@@ -1,9 +1,8 @@
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::quote;
 
+use crate::options::ForwardAttrs;
 use crate::util::PathList;
-
-use super::ForwardAttrs;
 
 /// Infrastructure for generating an attribute extractor.
 pub trait ExtractAttribute {
@@ -13,7 +12,7 @@ pub trait ExtractAttribute {
     /// Gets the list of attribute names that should be parsed by the extractor.
     fn attr_names(&self) -> &PathList;
 
-    fn forward_attrs(&self) -> &ForwardAttrs<'_>;
+    fn forwarded_attrs(&self) -> Option<&ForwardAttrs>;
 
     /// Gets the name used by the generated impl to return to the `syn` item passed as input.
     fn param_name(&self) -> TokenStream;
@@ -31,16 +30,13 @@ pub trait ExtractAttribute {
 
     /// Generates the main extraction loop.
     fn extractor(&self) -> TokenStream {
-        let mut declarations = self.local_declarations();
-        self.forward_attrs()
-            .as_declaration()
-            .to_tokens(&mut declarations);
+        let declarations = self.local_declarations();
 
         let will_parse_any = !self.attr_names().is_empty();
-
-        // Forwarding requires both that there be some items we would forward,
-        // and a place that will keep the forwarded items.
-        let will_fwd_any = self.forward_attrs().will_forward_any();
+        let will_fwd_any = self
+            .forwarded_attrs()
+            .map(|fa| !fa.is_empty())
+            .unwrap_or_default();
 
         if !(will_parse_any || will_fwd_any) {
             return quote! {
@@ -86,15 +82,18 @@ pub trait ExtractAttribute {
             quote!()
         };
 
-        let fwd_population = self.forward_attrs().as_value_populator();
-
         // Specifies the behavior for unhandled attributes. They will either be silently ignored or
         // forwarded to the inner struct for later analysis.
-        let forward_unhandled = self.forward_attrs().as_match_arms();
+        let forward_unhandled = if will_fwd_any {
+            forwards_to_local(self.forwarded_attrs().unwrap())
+        } else {
+            quote!(_ => continue)
+        };
 
         quote!(
             #declarations
             use ::darling::ToTokens;
+            let mut __fwd_attrs: ::darling::export::Vec<::darling::export::syn::Attribute> = vec![];
 
             for __attr in #attrs_accessor {
                 // Filter attributes based on name
@@ -103,8 +102,20 @@ pub trait ExtractAttribute {
                     #forward_unhandled
                 }
             }
-
-            #fwd_population
         )
+    }
+}
+
+fn forwards_to_local(behavior: &ForwardAttrs) -> TokenStream {
+    let push_command = quote!(__fwd_attrs.push(__attr.clone()));
+    match *behavior {
+        ForwardAttrs::All => quote!(_ => #push_command),
+        ForwardAttrs::Only(ref idents) => {
+            let names = idents.to_strings();
+            quote!(
+                #(#names)|* => #push_command,
+                _ => continue,
+            )
+        }
     }
 }

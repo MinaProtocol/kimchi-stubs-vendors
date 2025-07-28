@@ -26,7 +26,6 @@ use core::hash::{BuildHasher, Hash};
 use core::marker::PhantomData;
 
 use crate::map::Slice as MapSlice;
-use crate::serde::cautious_capacity;
 use crate::set::Slice as SetSlice;
 use crate::IndexMap;
 
@@ -102,7 +101,7 @@ where
     where
         A: SeqAccess<'de>,
     {
-        let capacity = cautious_capacity::<K, V>(seq.size_hint());
+        let capacity = seq.size_hint().unwrap_or(0);
         let mut map = IndexMap::with_capacity_and_hasher(capacity, S::default());
 
         while let Some((key, value)) = seq.next_element()? {

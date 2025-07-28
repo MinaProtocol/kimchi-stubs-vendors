@@ -1,9 +1,5 @@
-//! # ⚠️ Unstable
-//!
-//! This is an internal module, no stability guarantees are provided. Use at
-//! your own risk.
-
-#![allow(clippy::missing_safety_doc)]
+//! This is mostly an internal module, no stability guarantees are provided. Use
+//! at your own risk.
 
 mod closures;
 mod impls;

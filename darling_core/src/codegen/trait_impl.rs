@@ -1,6 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Generics, Ident};
+use syn::{Generics, Ident, WherePredicate};
 
 use crate::ast::{Data, Fields};
 use crate::codegen::{
@@ -16,6 +16,7 @@ pub struct TraitImpl<'a> {
     pub data: Data<Variant<'a>, Field<'a>>,
     pub default: Option<DefaultExpression<'a>>,
     pub post_transform: Option<&'a PostfixTransform>,
+    pub bound: Option<&'a [WherePredicate]>,
     pub allow_unknown_fields: bool,
 }
 
@@ -37,8 +38,8 @@ impl<'a> TraitImpl<'a> {
 
     fn type_params_matching<F, V>(&self, field_filter: F, variant_filter: V) -> IdentSet
     where
-        F: Fn(&&Field<'_>) -> bool,
-        V: Fn(&&Variant<'_>) -> bool,
+        F: Fn(&&Field) -> bool,
+        V: Fn(&&Variant) -> bool,
     {
         let declared = self.declared_type_params();
         match self.data {
@@ -66,7 +67,7 @@ impl<'a> TraitImpl<'a> {
         declared: &IdentSet,
     ) -> IdentSet
     where
-        F: Fn(&&'b Field<'_>) -> bool,
+        F: Fn(&&'b Field) -> bool,
     {
         fields
             .iter()
@@ -82,7 +83,7 @@ impl<'a> TraitImpl<'a> {
     }
 
     /// Gets the check which performs an early return if errors occurred during parsing.
-    pub fn check_errors(&self) -> ErrorCheck<'_> {
+    pub fn check_errors(&self) -> ErrorCheck {
         ErrorCheck::default()
     }
 
@@ -111,17 +112,7 @@ impl<'a> TraitImpl<'a> {
         if let Data::Struct(ref vd) = self.data {
             let check_nones = vd.as_ref().map(Field::as_presence_check);
             let checks = check_nones.fields.as_slice();
-
-            // If a field was marked `flatten`, now is the time to process any unclaimed meta items
-            // and mark the field as having been seen.
-            let flatten_field_init = vd.fields.iter().find(|f| f.flatten).map(|v| {
-                v.as_flatten_initializer(vd.fields.iter().filter_map(Field::as_name).collect())
-            });
-
-            quote! {
-                #flatten_field_init
-                #(#checks)*
-            }
+            quote!(#(#checks)*)
         } else {
             quote!()
         }
