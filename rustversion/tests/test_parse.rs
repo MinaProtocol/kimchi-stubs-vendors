@@ -95,7 +95,7 @@ fn test_parse() {
     for (string, expected) in cases {
         match parse(string) {
             ParseResult::Success(version) => assert_eq!(version, *expected),
-            ParseResult::OopsClippy | ParseResult::OopsMirai | ParseResult::Unrecognized => {
+            ParseResult::OopsClippy | ParseResult::Unrecognized => {
                 panic!("unrecognized: {:?}", string);
             }
         }

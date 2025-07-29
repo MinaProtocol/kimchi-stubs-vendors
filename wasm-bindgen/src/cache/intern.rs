@@ -1,5 +1,6 @@
 use cfg_if::cfg_if;
 
+
 cfg_if! {
     if #[cfg(feature = "enable-interning")] {
         use std::thread_local;
@@ -50,6 +51,7 @@ cfg_if! {
     }
 }
 
+
 /// Interns Rust strings so that it's much faster to send them to JS.
 ///
 /// Sending strings from Rust to JS is slow, because it has to do a full `O(n)`
@@ -86,6 +88,7 @@ pub fn intern(s: &str) -> &str {
 
     s
 }
+
 
 /// Removes a Rust string from the intern cache.
 ///

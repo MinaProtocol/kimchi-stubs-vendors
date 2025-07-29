@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.67.1"
 name = "time"
-version = "0.3.41"
+version = "0.3.40"
 authors = [
     "Jacob Pratt <open-source@jhpratt.dev>",
     "Time contributors",
@@ -138,7 +138,7 @@ default-features = false
 version = "=0.1.4"
 
 [dependencies.time-macros]
-version = "=0.2.22"
+version = "=0.2.21"
 optional = true
 
 [dev-dependencies.num-conv]
@@ -170,7 +170,7 @@ version = "1.0.68"
 version = "1.0.126"
 
 [dev-dependencies.time-macros]
-version = "=0.2.22"
+version = "=0.2.21"
 
 [target."cfg(__ui_tests)".dev-dependencies.trybuild]
 version = "1.0.102"
@@ -193,7 +193,6 @@ optional = true
 
 [lints.clippy]
 alloc-instead-of-core = "deny"
-as-underscore = "warn"
 dbg-macro = "warn"
 decimal-literal-representation = "warn"
 explicit-auto-deref = "warn"

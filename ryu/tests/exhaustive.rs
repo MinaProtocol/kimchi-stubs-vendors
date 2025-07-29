@@ -1,5 +1,4 @@
-#![cfg_attr(not(check_cfg), allow(unexpected_cfgs))]
-#![allow(clippy::cast_possible_truncation)]
+#![cfg(exhaustive)]
 
 use std::str;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -7,7 +6,6 @@ use std::sync::Arc;
 use std::thread;
 
 #[test]
-#[cfg_attr(not(exhaustive), ignore = "requires cfg(exhaustive)")]
 fn test_exhaustive() {
     const BATCH_SIZE: u32 = 1_000_000;
     let counter = Arc::new(AtomicUsize::new(0));

@@ -5,7 +5,7 @@
  * Various scanning routines for the parser.
  */
 
-use super::{INVALID, OUT_OF_RANGE, ParseResult, TOO_SHORT};
+use super::{ParseResult, INVALID, OUT_OF_RANGE, TOO_SHORT};
 use crate::Weekday;
 
 /// Tries to parse the non-negative number from `min` to `max` digits.
@@ -217,7 +217,11 @@ where
 
     const fn digits(s: &str) -> ParseResult<(u8, u8)> {
         let b = s.as_bytes();
-        if b.len() < 2 { Err(TOO_SHORT) } else { Ok((b[0], b[1])) }
+        if b.len() < 2 {
+            Err(TOO_SHORT)
+        } else {
+            Ok((b[0], b[1]))
+        }
     }
     let negative = match s.chars().next() {
         Some('+') => {
@@ -283,39 +287,37 @@ where
 /// See [RFC 2822 Section 4.3].
 ///
 /// [RFC 2822 Section 4.3]: https://tools.ietf.org/html/rfc2822#section-4.3
-pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, i32)> {
+pub(super) fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> {
     // tries to parse legacy time zone names
     let upto = s.as_bytes().iter().position(|&c| !c.is_ascii_alphabetic()).unwrap_or(s.len());
     if upto > 0 {
         let name = &s.as_bytes()[..upto];
         let s = &s[upto..];
-        let offset_hours = |o| Ok((s, o * 3600));
-        // RFC 2822 requires support for some named North America timezones, a small subset of all
-        // named timezones.
-        if name.eq_ignore_ascii_case(b"gmt")
-            || name.eq_ignore_ascii_case(b"ut")
-            || name.eq_ignore_ascii_case(b"z")
-        {
-            return offset_hours(0);
+        let offset_hours = |o| Ok((s, Some(o * 3600)));
+        if name.eq_ignore_ascii_case(b"gmt") || name.eq_ignore_ascii_case(b"ut") {
+            offset_hours(0)
         } else if name.eq_ignore_ascii_case(b"edt") {
-            return offset_hours(-4);
+            offset_hours(-4)
         } else if name.eq_ignore_ascii_case(b"est") || name.eq_ignore_ascii_case(b"cdt") {
-            return offset_hours(-5);
+            offset_hours(-5)
         } else if name.eq_ignore_ascii_case(b"cst") || name.eq_ignore_ascii_case(b"mdt") {
-            return offset_hours(-6);
+            offset_hours(-6)
         } else if name.eq_ignore_ascii_case(b"mst") || name.eq_ignore_ascii_case(b"pdt") {
-            return offset_hours(-7);
+            offset_hours(-7)
         } else if name.eq_ignore_ascii_case(b"pst") {
-            return offset_hours(-8);
+            offset_hours(-8)
         } else if name.len() == 1 {
-            if let b'a'..=b'i' | b'k'..=b'y' | b'A'..=b'I' | b'K'..=b'Y' = name[0] {
+            match name[0] {
                 // recommended by RFC 2822: consume but treat it as -0000
-                return Ok((s, 0));
+                b'a'..=b'i' | b'k'..=b'z' | b'A'..=b'I' | b'K'..=b'Z' => offset_hours(0),
+                _ => Ok((s, None)),
             }
+        } else {
+            Ok((s, None))
         }
-        Err(INVALID)
     } else {
-        timezone_offset(s, |s| Ok(s), false, false, false)
+        let (s_, offset) = timezone_offset(s, |s| Ok(s), false, false, false)?;
+        Ok((s_, Some(offset)))
     }
 }
 
@@ -355,8 +357,8 @@ mod tests {
         comment_2822, nanosecond, nanosecond_fixed, short_or_long_month0, short_or_long_weekday,
         timezone_offset_2822,
     };
-    use crate::Weekday;
     use crate::format::{INVALID, TOO_SHORT};
+    use crate::Weekday;
 
     #[test]
     fn test_rfc2822_comments() {
@@ -394,11 +396,11 @@ mod tests {
 
     #[test]
     fn test_timezone_offset_2822() {
-        assert_eq!(timezone_offset_2822("cSt").unwrap(), ("", -21600));
-        assert_eq!(timezone_offset_2822("pSt").unwrap(), ("", -28800));
-        assert_eq!(timezone_offset_2822("mSt").unwrap(), ("", -25200));
-        assert_eq!(timezone_offset_2822("-1551").unwrap(), ("", -57060));
-        assert_eq!(timezone_offset_2822("Gp"), Err(INVALID));
+        assert_eq!(timezone_offset_2822("cSt").unwrap(), ("", Some(-21600)));
+        assert_eq!(timezone_offset_2822("pSt").unwrap(), ("", Some(-28800)));
+        assert_eq!(timezone_offset_2822("mSt").unwrap(), ("", Some(-25200)));
+        assert_eq!(timezone_offset_2822("-1551").unwrap(), ("", Some(-57060)));
+        assert_eq!(timezone_offset_2822("Gp").unwrap(), ("", None));
     }
 
     #[test]

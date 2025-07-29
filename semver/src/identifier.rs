@@ -200,10 +200,6 @@ impl Identifier {
             unsafe { ptr_as_str(&self.head) }
         }
     }
-
-    pub(crate) fn ptr_eq(&self, rhs: &Self) -> bool {
-        self.head == rhs.head && self.tail == rhs.tail
-    }
 }
 
 impl Clone for Identifier {
@@ -263,10 +259,10 @@ impl Drop for Identifier {
 
 impl PartialEq for Identifier {
     fn eq(&self, rhs: &Self) -> bool {
-        if self.ptr_eq(rhs) {
+        if self.is_empty_or_inline() {
             // Fast path (most common)
-            true
-        } else if self.is_empty_or_inline() || rhs.is_empty_or_inline() {
+            self.head == rhs.head && self.tail == rhs.tail
+        } else if rhs.is_empty_or_inline() {
             false
         } else {
             // SAFETY: both reprs are in the heap allocated representation.

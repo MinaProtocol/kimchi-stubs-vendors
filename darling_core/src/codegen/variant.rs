@@ -26,6 +26,10 @@ pub struct Variant<'a> {
     /// Whether or not the variant should be skipped in the generated code.
     pub skip: bool,
 
+    /// Whether or not the variant should be used to create an instance for
+    /// `FromMeta::from_word`.
+    pub word: bool,
+
     pub allow_unknown_fields: bool,
 }
 
@@ -43,7 +47,7 @@ impl<'a> Variant<'a> {
     }
 }
 
-impl UsesTypeParams for Variant<'_> {
+impl<'a> UsesTypeParams for Variant<'a> {
     fn uses_type_params<'b>(
         &self,
         options: &usage::Options,
@@ -53,26 +57,30 @@ impl UsesTypeParams for Variant<'_> {
     }
 }
 
+impl<'a> ToTokens for Variant<'a> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        if self.data.is_unit() {
+            self.as_unit_match_arm().to_tokens(tokens);
+        } else {
+            self.as_data_match_arm().to_tokens(tokens)
+        }
+    }
+}
+
 /// Code generator for an enum variant in a unit match position.
 /// This is placed in generated `from_string` calls for the parent enum.
 /// Value-carrying variants wrapped in this type will emit code to produce an "unsupported format" error.
 pub struct UnitMatchArm<'a>(&'a Variant<'a>);
 
-impl ToTokens for UnitMatchArm<'_> {
+impl<'a> ToTokens for UnitMatchArm<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let val: &Variant<'_> = self.0;
+        let val: &Variant<'a> = self.0;
 
         if val.skip {
             return;
         }
 
         let name_in_attr = &val.name_in_attr;
-
-        let unsupported_format_error = || {
-            quote!(::darling::export::Err(
-                ::darling::Error::unsupported_format("literal")
-            ))
-        };
 
         if val.data.is_unit() {
             let variant_ident = val.variant_ident;
@@ -81,29 +89,9 @@ impl ToTokens for UnitMatchArm<'_> {
             tokens.append_all(quote!(
                 #name_in_attr => ::darling::export::Ok(#ty_ident::#variant_ident),
             ));
-        } else if val.data.is_newtype() {
-            let field = val
-                .data
-                .fields
-                .first()
-                .expect("Newtype should have exactly one field");
-            let field_ty = field.ty;
-            let ty_ident = val.ty_ident;
-            let variant_ident = val.variant_ident;
-            let unsupported_format = unsupported_format_error();
-
-            tokens.append_all(quote!{
-                #name_in_attr => {
-                    match <#field_ty as ::darling::FromMeta>::from_none() {
-                        ::darling::export::Some(__value) => ::darling::export::Ok(#ty_ident::#variant_ident(__value)),
-                        ::darling::export::None => #unsupported_format,
-                    }
-                }
-            })
         } else {
-            let unsupported_format = unsupported_format_error();
             tokens.append_all(quote!(
-                #name_in_attr => #unsupported_format,
+                #name_in_attr => ::darling::export::Err(::darling::Error::unsupported_format("literal")),
             ));
         }
     }
@@ -114,9 +102,9 @@ impl ToTokens for UnitMatchArm<'_> {
 /// Unit variants wrapped in this type will emit code to produce an "unsupported format" error.
 pub struct DataMatchArm<'a>(&'a Variant<'a>);
 
-impl ToTokens for DataMatchArm<'_> {
+impl<'a> ToTokens for DataMatchArm<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let val: &Variant<'_> = self.0;
+        let val: &Variant<'a> = self.0;
 
         if val.skip {
             return;
@@ -127,16 +115,8 @@ impl ToTokens for DataMatchArm<'_> {
         let ty_ident = val.ty_ident;
 
         if val.data.is_unit() {
-            // Allow unit variants to match a list item if it's just a path with no associated
-            // value, e.g. `volume(shout)` is allowed.
             tokens.append_all(quote!(
-                #name_in_attr => {
-                    if let ::darling::export::syn::Meta::Path(_) = *__nested {
-                        ::darling::export::Ok(#ty_ident::#variant_ident)
-                    } else {
-                        ::darling::export::Err(::darling::Error::unsupported_format("non-path"))
-                    }
-                },
+                #name_in_attr => ::darling::export::Err(::darling::Error::unsupported_format("list")),
             ));
 
             return;

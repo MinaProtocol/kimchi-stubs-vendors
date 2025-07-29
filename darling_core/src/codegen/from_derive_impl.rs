@@ -1,29 +1,28 @@
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens};
+use quote::{quote, ToTokens};
 use syn::Ident;
 
 use crate::{
     ast::Data,
     codegen::{ExtractAttribute, OuterFromImpl, TraitImpl},
-    options::{DeriveInputShapeSet, ForwardedField},
+    options::{DeriveInputShapeSet, ForwardAttrs},
     util::PathList,
 };
-
-use super::ForwardAttrs;
 
 pub struct FromDeriveInputImpl<'a> {
     pub ident: Option<&'a Ident>,
     pub generics: Option<&'a Ident>,
     pub vis: Option<&'a Ident>,
-    pub data: Option<&'a ForwardedField>,
+    pub attrs: Option<&'a Ident>,
+    pub data: Option<&'a Ident>,
     pub base: TraitImpl<'a>,
     pub attr_names: &'a PathList,
-    pub forward_attrs: ForwardAttrs<'a>,
+    pub forward_attrs: Option<&'a ForwardAttrs>,
     pub from_ident: bool,
     pub supports: Option<&'a DeriveInputShapeSet>,
 }
 
-impl ToTokens for FromDeriveInputImpl<'_> {
+impl<'a> ToTokens for FromDeriveInputImpl<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let ty_ident = self.base.ident;
         let input = self.param_name();
@@ -55,15 +54,11 @@ impl ToTokens for FromDeriveInputImpl<'_> {
             .generics
             .as_ref()
             .map(|i| quote!(#i: ::darling::FromGenerics::from_generics(&#input.generics)?,));
-        let passed_attrs = self.forward_attrs.as_initializer();
-        let passed_body = self.data.as_ref().map(|i| {
-            let ForwardedField { ident, with } = i;
-            let path = match with {
-                Some(p) => quote!(#p),
-                None => quote_spanned!(ident.span()=> ::darling::ast::Data::try_from),
-            };
-            quote_spanned!(ident.span()=> #ident: #path(&#input.data)?,)
-        });
+        let passed_attrs = self.attrs.as_ref().map(|i| quote!(#i: __fwd_attrs,));
+        let passed_body = self
+            .data
+            .as_ref()
+            .map(|i| quote!(#i: ::darling::ast::Data::try_from(&#input.data)?,));
 
         let supports = self.supports.map(|i| {
             quote! {
@@ -115,13 +110,13 @@ impl ToTokens for FromDeriveInputImpl<'_> {
     }
 }
 
-impl ExtractAttribute for FromDeriveInputImpl<'_> {
+impl<'a> ExtractAttribute for FromDeriveInputImpl<'a> {
     fn attr_names(&self) -> &PathList {
         self.attr_names
     }
 
-    fn forward_attrs(&self) -> &ForwardAttrs<'_> {
-        &self.forward_attrs
+    fn forwarded_attrs(&self) -> Option<&ForwardAttrs> {
+        self.forward_attrs
     }
 
     fn param_name(&self) -> TokenStream {

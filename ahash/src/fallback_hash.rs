@@ -56,8 +56,8 @@ impl AHasher {
     #[allow(dead_code)] // Is not called if non-fallback hash is used.
     pub(crate) fn from_random_state(rand_state: &RandomState) -> AHasher {
         AHasher {
-            buffer: rand_state.k1,
-            pad: rand_state.k0,
+            buffer: rand_state.k0,
+            pad: rand_state.k1,
             extra_keys: [rand_state.k2, rand_state.k3],
         }
     }
@@ -117,7 +117,7 @@ impl AHasher {
     #[inline]
     #[cfg(feature = "specialize")]
     fn short_finish(&self) -> u64 {
-        folded_multiply(self.buffer, self.pad)
+        self.buffer.wrapping_add(self.pad)
     }
 }
 
@@ -210,8 +210,8 @@ pub(crate) struct AHasherU64 {
 impl Hasher for AHasherU64 {
     #[inline]
     fn finish(&self) -> u64 {
-        folded_multiply(self.buffer, self.pad)
-        //self.buffer
+        let rot = (self.pad & 63) as u32;
+        self.buffer.rotate_left(rot)
     }
 
     #[inline]
@@ -341,6 +341,7 @@ impl Hasher for AHasherStr {
 
 #[cfg(test)]
 mod tests {
+    use crate::convert::Convert;
     use crate::fallback_hash::*;
 
     #[test]

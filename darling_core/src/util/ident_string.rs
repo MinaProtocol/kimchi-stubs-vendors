@@ -99,7 +99,7 @@ impl PartialEq<String> for IdentString {
     }
 }
 
-impl PartialEq<&str> for IdentString {
+impl<'a> PartialEq<&'a str> for IdentString {
     fn eq(&self, rhs: &&str) -> bool {
         self.as_str() == *rhs
     }
@@ -118,13 +118,13 @@ impl ToTokens for IdentString {
 }
 
 impl fmt::Debug for IdentString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{:?}", self.ident)
     }
 }
 
 impl fmt::Display for IdentString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.ident)
     }
 }
