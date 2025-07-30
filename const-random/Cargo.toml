@@ -12,7 +12,7 @@
 [package]
 edition = "2018"
 name = "const-random"
-version = "0.1.18"
+version = "0.1.17"
 authors = ["Tom Kaitchuck <Tom.Kaitchuck@gmail.com>"]
 description = "Provides compile time random number generation."
 documentation = "https://docs.rs/const-random"

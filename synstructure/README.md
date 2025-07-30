@@ -2,7 +2,7 @@
 
 [![Latest Version](https://img.shields.io/crates/v/synstructure.svg)](https://crates.io/crates/synstructure)
 [![Documentation](https://docs.rs/synstructure/badge.svg)](https://docs.rs/synstructure)
-[![Build Status](https://travis-ci.org/mystor/synstructure.svg?branch=master)](https://travis-ci.org/mystor/synstructure)
+[![Build Status](https://github.com/mystor/synstructure/actions/workflows/ci.yml/badge.svg)](https://github.com/mystor/synstructure/actions)
 [![Rustc Version 1.31+](https://img.shields.io/badge/rustc-1.31+-lightgray.svg)](https://blog.rust-lang.org/2018/12/06/Rust-1.31-and-rust-2018.html)
 
 > NOTE: What follows is an exerpt from the module level documentation. For full
@@ -59,8 +59,7 @@ fn main() {
             }
         }
         expands to {
-            #[allow(non_upper_case_globals)]
-            const _DERIVE_example_traits_WalkFields_FOR_A: () = {
+            const _: () = {
                 extern crate example_traits;
                 impl<T> example_traits::WalkFields for A<T>
                     where T: example_traits::WalkFields
@@ -129,8 +128,7 @@ fn main() {
             }
         }
         expands to {
-            #[allow(non_upper_case_globals)]
-            const _DERIVE_example_traits_Interest_FOR_A: () = {
+            const _: () = {
                 extern crate example_traits;
                 impl<T> example_traits::Interest for A<T>
                     where T: example_traits::Interest

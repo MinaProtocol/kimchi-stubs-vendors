@@ -4,7 +4,6 @@ use core::fmt;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use crate::OutOfRange;
-use crate::naive::NaiveDate;
 
 /// The month of the year.
 ///
@@ -30,6 +29,7 @@ use crate::naive::NaiveDate;
 /// Can be Serialized/Deserialized with serde
 // Actual implementation is zero-indexed, API intended as 1-indexed for more intuitive behavior.
 #[derive(PartialEq, Eq, Copy, Clone, Debug, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "rustc-serialize", derive(RustcEncodable, RustcDecodable))]
 #[cfg_attr(
     any(feature = "rkyv", feature = "rkyv-16", feature = "rkyv-32", feature = "rkyv-64"),
     derive(Archive, Deserialize, Serialize),
@@ -37,7 +37,7 @@ use crate::naive::NaiveDate;
     archive_attr(derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash))
 )]
 #[cfg_attr(feature = "rkyv-validation", archive(check_bytes))]
-#[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Month {
     /// January
     January = 0,
@@ -162,29 +162,6 @@ impl Month {
             Month::December => "December",
         }
     }
-
-    /// Get the length in days of the month
-    ///
-    /// Yields `None` if `year` is out of range for `NaiveDate`.
-    pub fn num_days(&self, year: i32) -> Option<u8> {
-        Some(match *self {
-            Month::January => 31,
-            Month::February => match NaiveDate::from_ymd_opt(year, 2, 1)?.leap_year() {
-                true => 29,
-                false => 28,
-            },
-            Month::March => 31,
-            Month::April => 30,
-            Month::May => 31,
-            Month::June => 30,
-            Month::July => 31,
-            Month::August => 31,
-            Month::September => 30,
-            Month::October => 31,
-            Month::November => 30,
-            Month::December => 31,
-        })
-    }
 }
 
 impl TryFrom<u8> for Month {
@@ -215,6 +192,7 @@ impl num_traits::FromPrimitive for Month {
     /// `Month::from_i64(n: i64)`: | `1`                  | `2`                   | ... | `12`
     /// ---------------------------| -------------------- | --------------------- | ... | -----
     /// ``:                        | Some(Month::January) | Some(Month::February) | ... | Some(Month::December)
+
     #[inline]
     fn from_u64(n: u64) -> Option<Month> {
         Self::from_u32(n as u32)
@@ -247,7 +225,7 @@ impl num_traits::FromPrimitive for Month {
 
 /// A duration in calendar months
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
-#[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Months(pub(crate) u32);
 
 impl Months {
@@ -302,7 +280,7 @@ mod month_serde {
 
     struct MonthVisitor;
 
-    impl de::Visitor<'_> for MonthVisitor {
+    impl<'de> de::Visitor<'de> for MonthVisitor {
         type Value = Month;
 
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -395,8 +373,8 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn test_serde_serialize() {
-        use Month::*;
         use serde_json::to_string;
+        use Month::*;
 
         let cases: Vec<(Month, &str)> = vec![
             (January, "\"January\""),
@@ -422,8 +400,8 @@ mod tests {
     #[test]
     #[cfg(feature = "serde")]
     fn test_serde_deserialize() {
-        use Month::*;
         use serde_json::from_str;
+        use Month::*;
 
         let cases: Vec<(&str, Month)> = vec![
             ("\"january\"", January),
@@ -461,12 +439,5 @@ mod tests {
         let month = Month::January;
         let bytes = rkyv::to_bytes::<_, 1>(&month).unwrap();
         assert_eq!(rkyv::from_bytes::<Month>(&bytes).unwrap(), month);
-    }
-
-    #[test]
-    fn num_days() {
-        assert_eq!(Month::January.num_days(2020), Some(31));
-        assert_eq!(Month::February.num_days(2020), Some(29));
-        assert_eq!(Month::February.num_days(2019), Some(28));
     }
 }

@@ -1,7 +1,4 @@
-#![allow(
-    clippy::semicolon_if_nothing_returned, // https://github.com/rust-lang/rust-clippy/issues/7324
-    clippy::used_underscore_items,
-)]
+#![allow(clippy::semicolon_if_nothing_returned)] // https://github.com/rust-lang/rust-clippy/issues/7324
 
 #[rustversion::attr(all(), const)]
 fn _basic() {}

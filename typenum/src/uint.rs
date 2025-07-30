@@ -915,7 +915,6 @@ where
     type Output = Shleft<UInt<UInt<U, B>, B0>, Sub1<UInt<Ur, Br>>>;
     #[inline]
     fn shl(self, rhs: UInt<Ur, Br>) -> Self::Output {
-        #[allow(clippy::suspicious_arithmetic_impl)]
         (UInt { msb: self, lsb: B0 }).shl(rhs - B1)
     }
 }
@@ -986,7 +985,6 @@ where
     type Output = Shright<U, Sub1<UInt<Ur, Br>>>;
     #[inline]
     fn shr(self, rhs: UInt<Ur, Br>) -> Self::Output {
-        #[allow(clippy::suspicious_arithmetic_impl)]
         self.msb.shr(rhs - B1)
     }
 }
@@ -1655,12 +1653,8 @@ fn test_set_bit() {
 //     R -= D
 //     Q[i] = 1
 
-#[cfg(test)]
-mod div_tests {
-    use crate::Unsigned;
-
-    use super::SetBitOut;
-
+#[cfg(tests)]
+mod tests {
     macro_rules! test_div {
         ($a:ident / $b:ident = $c:ident) => {{
             type R = Quot<$a, $b>;
@@ -1712,8 +1706,8 @@ where
 {
     type Output = PrivateDivQuot<UInt<Ul, Bl>, UInt<Ur, Br>, U0, U0, Sub1<Length<UInt<Ul, Bl>>>>;
     #[inline]
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::suspicious_arithmetic_impl))]
     fn div(self, rhs: UInt<Ur, Br>) -> Self::Output {
-        #[allow(clippy::suspicious_arithmetic_impl)]
         ().private_div_quotient(self, rhs, U0::new(), U0::new(), self.len() - B1)
     }
 }
@@ -1741,7 +1735,6 @@ where
     type Output = PrivateDivRem<UInt<Ul, Bl>, UInt<Ur, Br>, U0, U0, Sub1<Length<UInt<Ul, Bl>>>>;
     #[inline]
     fn rem(self, rhs: UInt<Ur, Br>) -> Self::Output {
-        #[allow(clippy::suspicious_arithmetic_impl)]
         ().private_div_remainder(self, rhs, UTerm, UTerm, self.len() - B1)
     }
 }

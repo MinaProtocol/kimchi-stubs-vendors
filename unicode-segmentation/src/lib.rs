@@ -56,6 +56,14 @@
 )]
 #![no_std]
 
+#[cfg(test)]
+#[macro_use]
+extern crate std;
+
+#[cfg(test)]
+#[macro_use]
+extern crate quickcheck;
+
 pub use grapheme::{GraphemeCursor, GraphemeIncomplete};
 pub use grapheme::{GraphemeIndices, Graphemes};
 pub use sentence::{USentenceBoundIndices, USentenceBounds, UnicodeSentences};
@@ -63,10 +71,15 @@ pub use tables::UNICODE_VERSION;
 pub use word::{UWordBoundIndices, UWordBounds, UnicodeWordIndices, UnicodeWords};
 
 mod grapheme;
-mod sentence;
 #[rustfmt::skip]
 mod tables;
+mod sentence;
 mod word;
+
+#[cfg(test)]
+mod test;
+#[cfg(test)]
+mod testdata;
 
 /// Methods for segmenting strings according to
 /// [Unicode Standard Annex #29](http://www.unicode.org/reports/tr29/).
@@ -96,7 +109,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&gr2[..], b);
     /// ```
-    fn graphemes(&self, is_extended: bool) -> Graphemes<'_>;
+    fn graphemes<'a>(&'a self, is_extended: bool) -> Graphemes<'a>;
 
     /// Returns an iterator over the grapheme clusters of `self` and their
     /// byte offsets. See `graphemes()` for more information.
@@ -111,7 +124,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&gr_inds[..], b);
     /// ```
-    fn grapheme_indices(&self, is_extended: bool) -> GraphemeIndices<'_>;
+    fn grapheme_indices<'a>(&'a self, is_extended: bool) -> GraphemeIndices<'a>;
 
     /// Returns an iterator over the words of `self`, separated on
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries).
@@ -133,7 +146,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&uw1[..], b);
     /// ```
-    fn unicode_words(&self) -> UnicodeWords<'_>;
+    fn unicode_words<'a>(&'a self) -> UnicodeWords<'a>;
 
     /// Returns an iterator over the words of `self`, separated on
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries), and their
@@ -157,7 +170,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&uwi1[..], b);
     /// ```
-    fn unicode_word_indices(&self) -> UnicodeWordIndices<'_>;
+    fn unicode_word_indices<'a>(&'a self) -> UnicodeWordIndices<'a>;
 
     /// Returns an iterator over substrings of `self` separated on
     /// [UAX#29 word boundaries](http://www.unicode.org/reports/tr29/#Word_Boundaries).
@@ -173,7 +186,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&swu1[..], b);
     /// ```
-    fn split_word_bounds(&self) -> UWordBounds<'_>;
+    fn split_word_bounds<'a>(&'a self) -> UWordBounds<'a>;
 
     /// Returns an iterator over substrings of `self`, split on UAX#29 word boundaries,
     /// and their offsets. See `split_word_bounds()` for more information.
@@ -188,7 +201,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&swi1[..], b);
     /// ```
-    fn split_word_bound_indices(&self) -> UWordBoundIndices<'_>;
+    fn split_word_bound_indices<'a>(&'a self) -> UWordBoundIndices<'a>;
 
     /// Returns an iterator over substrings of `self` separated on
     /// [UAX#29 sentence boundaries](http://www.unicode.org/reports/tr29/#Sentence_Boundaries).
@@ -210,7 +223,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&us1[..], b);
     /// ```
-    fn unicode_sentences(&self) -> UnicodeSentences<'_>;
+    fn unicode_sentences<'a>(&'a self) -> UnicodeSentences<'a>;
 
     /// Returns an iterator over substrings of `self` separated on
     /// [UAX#29 sentence boundaries](http://www.unicode.org/reports/tr29/#Sentence_Boundaries).
@@ -227,7 +240,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&ssb1[..], b);
     /// ```
-    fn split_sentence_bounds(&self) -> USentenceBounds<'_>;
+    fn split_sentence_bounds<'a>(&'a self) -> USentenceBounds<'a>;
 
     /// Returns an iterator over substrings of `self`, split on UAX#29 sentence boundaries,
     /// and their offsets. See `split_sentence_bounds()` for more information.
@@ -243,7 +256,7 @@ pub trait UnicodeSegmentation {
     ///
     /// assert_eq!(&ssi1[..], b);
     /// ```
-    fn split_sentence_bound_indices(&self) -> USentenceBoundIndices<'_>;
+    fn split_sentence_bound_indices<'a>(&'a self) -> USentenceBoundIndices<'a>;
 }
 
 impl UnicodeSegmentation for str {

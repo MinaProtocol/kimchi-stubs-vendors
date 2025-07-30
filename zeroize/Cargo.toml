@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.60"
 name = "zeroize"
-version = "1.8.1"
+version = "1.7.0"
 authors = ["The RustCrypto Project Developers"]
 description = """
 Securely clear secrets from memory with a simple trait built on
@@ -60,5 +60,4 @@ aarch64 = []
 alloc = []
 default = ["alloc"]
 derive = ["zeroize_derive"]
-simd = []
 std = ["alloc"]
