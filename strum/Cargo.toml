@@ -10,11 +10,13 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
+rust-version = "1.66.1"
 name = "strum"
-version = "0.26.3"
+version = "0.27.2"
 authors = ["Peter Glotfelty <peter.glotfelty@microsoft.com>"]
 build = false
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -43,26 +45,25 @@ rustdoc-args = [
     "docsrs",
 ]
 
-[lib]
-name = "strum"
-path = "src/lib.rs"
-
-[dependencies.phf]
-version = "0.10"
-features = ["macros"]
-optional = true
-
-[dependencies.strum_macros]
-version = "0.26.3"
-optional = true
-
-[dev-dependencies.strum_macros]
-version = "0.26"
+[badges.travis-ci]
+repository = "Peternator7/strum"
 
 [features]
 default = ["std"]
 derive = ["strum_macros"]
 std = []
 
-[badges.travis-ci]
-repository = "Peternator7/strum"
+[lib]
+name = "strum"
+path = "src/lib.rs"
+
+[dependencies.phf]
+version = "0.12"
+features = ["macros"]
+optional = true
+
+[dependencies.strum_macros]
+version = "0.27"
+optional = true
+
+[dev-dependencies]
