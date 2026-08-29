@@ -23,7 +23,7 @@ fn fail_nil_from_reserved() {
     let res: Result<(), Error> = Deserialize::deserialize(&mut de);
     match res.err() {
         Some(Error::TypeMismatch(Marker::Reserved)) => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -46,7 +46,7 @@ fn fail_bool_from_fixint() {
     let res: Result<bool, Error> = Deserialize::deserialize(&mut deserializer);
     match res.err().unwrap() {
         Error::Syntax(..) => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -80,7 +80,7 @@ fn fail_u32_from_u64() {
     let res: Result<u32, Error> = Deserialize::deserialize(&mut de);
     match res.err().unwrap() {
         Error::Syntax(..) => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -249,7 +249,7 @@ fn fail_tuple_len_mismatch() {
 
     match actual.err().unwrap() {
         Error::LengthMismatch(1) => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -298,7 +298,7 @@ fn fail_option_u8_from_reserved() {
     let actual: Result<Option<u8>, Error> = Deserialize::deserialize(&mut de);
     match actual.err() {
         Some(Error::TypeMismatch(Marker::Reserved)) => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }
 
@@ -398,12 +398,12 @@ fn test_deserialize_numeric() {
     }
 
     impl<'de> de::Deserialize<'de> for FloatOrInteger {
-        fn deserialize<D>(de: D) -> Result<FloatOrInteger, D::Error>
+        fn deserialize<D>(de: D) -> Result<Self, D::Error>
             where D: de::Deserializer<'de>
         {
             struct FloatOrIntegerVisitor;
 
-            impl<'de> de::Visitor<'de> for FloatOrIntegerVisitor {
+            impl de::Visitor<'_> for FloatOrIntegerVisitor {
                 type Value = FloatOrInteger;
 
                 fn expecting(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
@@ -485,7 +485,7 @@ fn pass_from() {
 
 #[test]
 fn pass_raw_valid_utf8() {
-    let buf = vec![0xa3, 0x6b, 0x65, 0x79];
+    let buf = [0xa3, 0x6b, 0x65, 0x79];
     let raw: Raw = rmp_serde::from_slice(&buf[..]).unwrap();
 
     assert!(raw.is_str());
@@ -497,7 +497,7 @@ fn pass_raw_valid_utf8() {
 fn pass_raw_invalid_utf8() {
     // >>> msgpack.dumps(msgpack.dumps([200, []]))
     // '\xa4\x92\xcc\xc8\x90'
-    let buf = vec![0xa4, 0x92, 0xcc, 0xc8, 0x90];
+    let buf = [0xa4, 0x92, 0xcc, 0xc8, 0x90];
     let raw: Raw = rmp_serde::from_slice(&buf[..]).unwrap();
 
     assert!(raw.is_err());
@@ -507,7 +507,7 @@ fn pass_raw_invalid_utf8() {
 
 #[test]
 fn pass_raw_ref_valid_utf8() {
-    let buf = vec![0xa3, 0x6b, 0x65, 0x79];
+    let buf = [0xa3, 0x6b, 0x65, 0x79];
     let raw: RawRef<'_> = rmp_serde::from_slice(&buf[..]).unwrap();
 
     assert!(raw.is_str());
@@ -519,7 +519,7 @@ fn pass_raw_ref_valid_utf8() {
 fn pass_raw_ref_invalid_utf8() {
     // >>> msgpack.dumps(msgpack.dumps([200, []]))
     // '\xa4\x92\xcc\xc8\x90'
-    let buf = vec![0xa4, 0x92, 0xcc, 0xc8, 0x90];
+    let buf = [0xa4, 0x92, 0xcc, 0xc8, 0x90];
     let raw: RawRef<'_> = rmp_serde::from_slice(&buf[..]).unwrap();
 
     assert!(raw.is_err());
@@ -529,14 +529,14 @@ fn pass_raw_ref_invalid_utf8() {
 
 #[test]
 fn fail_str_invalid_utf8() {
-    let buf = vec![0xa4, 0x92, 0xcc, 0xc8, 0x90];
+    let buf = [0xa4, 0x92, 0xcc, 0xc8, 0x90];
     let err: Result<String, decode::Error> = rmp_serde::from_slice(&buf[..]);
 
     assert!(err.is_err());
     match err.err().unwrap() {
         decode::Error::Utf8Error(err) => assert_eq!(0, err.valid_up_to()),
         // decode::Error::Syntax(err) => {}
-        err => panic!("unexpected error: {:?}", err),
+        err => panic!("unexpected error: {err:?}"),
     }
 }
 
@@ -544,7 +544,7 @@ fn fail_str_invalid_utf8() {
 fn fail_depth_limit() {
     #[allow(dead_code)]
     struct Nested {
-        sub: Vec<Nested>,
+        sub: Vec<Self>,
     }
 
     impl<'de> de::Deserialize<'de> for Nested {
@@ -552,7 +552,7 @@ fn fail_depth_limit() {
             where D: de::Deserializer<'de>
         {
             let nested = Vec::deserialize(de)?;
-            Ok(Nested { sub: nested })
+            Ok(Self { sub: nested })
         }
     }
     let mut data = Vec::new();
@@ -564,6 +564,6 @@ fn fail_depth_limit() {
     let res = Nested::deserialize(&mut reader);
     match res.err().unwrap() {
         decode::Error::DepthLimitExceeded => (),
-        other => panic!("unexpected result: {:?}", other),
+        other => panic!("unexpected result: {other:?}"),
     }
 }

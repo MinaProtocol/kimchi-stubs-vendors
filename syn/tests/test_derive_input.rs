@@ -8,7 +8,9 @@
 )]
 
 #[macro_use]
-mod macros;
+mod snapshot;
+
+mod debug;
 
 use quote::quote;
 use syn::{Data, DeriveInput};
@@ -68,6 +70,7 @@ fn test_struct() {
                 named: [
                     Field {
                         vis: Visibility::Public,
+                        modifiers: FieldModifiers,
                         ident: Some("ident"),
                         colon_token: Some,
                         ty: Type::Path {
@@ -83,6 +86,7 @@ fn test_struct() {
                     Token![,],
                     Field {
                         vis: Visibility::Public,
+                        modifiers: FieldModifiers,
                         ident: Some("attrs"),
                         colon_token: Some,
                         ty: Type::Path {
@@ -156,6 +160,7 @@ fn test_union() {
                 named: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ident: Some("uninit"),
                         colon_token: Some,
                         ty: Type::Tuple,
@@ -163,6 +168,7 @@ fn test_union() {
                     Token![,],
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ident: Some("value"),
                         colon_token: Some,
                         ty: Type::Path {
@@ -251,6 +257,7 @@ fn test_enum() {
                         unnamed: [
                             Field {
                                 vis: Visibility::Inherited,
+                                modifiers: FieldModifiers,
                                 ty: Type::Path {
                                     path: Path {
                                         segments: [
@@ -271,6 +278,7 @@ fn test_enum() {
                         unnamed: [
                             Field {
                                 vis: Visibility::Inherited,
+                                modifiers: FieldModifiers,
                                 ty: Type::Path {
                                     path: Path {
                                         segments: [
@@ -444,6 +452,7 @@ fn test_pub_restricted() {
                                 ],
                             },
                         },
+                        modifiers: FieldModifiers,
                         ty: Type::Path {
                             path: Path {
                                 segments: [
@@ -589,6 +598,7 @@ fn test_fields_on_named_struct() {
                 named: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ident: Some("foo"),
                         colon_token: Some,
                         ty: Type::Path {
@@ -604,6 +614,7 @@ fn test_fields_on_named_struct() {
                     Token![,],
                     Field {
                         vis: Visibility::Public,
+                        modifiers: FieldModifiers,
                         ident: Some("bar"),
                         colon_token: Some,
                         ty: Type::Path {
@@ -632,6 +643,7 @@ fn test_fields_on_named_struct() {
     [
         Field {
             vis: Visibility::Inherited,
+            modifiers: FieldModifiers,
             ident: Some("foo"),
             colon_token: Some,
             ty: Type::Path {
@@ -646,6 +658,7 @@ fn test_fields_on_named_struct() {
         },
         Field {
             vis: Visibility::Public,
+            modifiers: FieldModifiers,
             ident: Some("bar"),
             colon_token: Some,
             ty: Type::Path {
@@ -678,6 +691,7 @@ fn test_fields_on_tuple_struct() {
                 unnamed: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ty: Type::Path {
                             path: Path {
                                 segments: [
@@ -691,6 +705,7 @@ fn test_fields_on_tuple_struct() {
                     Token![,],
                     Field {
                         vis: Visibility::Public,
+                        modifiers: FieldModifiers,
                         ty: Type::Path {
                             path: Path {
                                 segments: [
@@ -717,6 +732,7 @@ fn test_fields_on_tuple_struct() {
     [
         Field {
             vis: Visibility::Inherited,
+            modifiers: FieldModifiers,
             ty: Type::Path {
                 path: Path {
                     segments: [
@@ -729,6 +745,7 @@ fn test_fields_on_tuple_struct() {
         },
         Field {
             vis: Visibility::Public,
+            modifiers: FieldModifiers,
             ty: Type::Path {
                 path: Path {
                     segments: [
@@ -760,6 +777,7 @@ fn test_ambiguous_crate() {
                 unnamed: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ty: Type::Path {
                             path: Path {
                                 segments: [

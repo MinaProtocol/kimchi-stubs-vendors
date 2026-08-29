@@ -2,6 +2,7 @@ extern crate rmp_serde as rmps;
 
 use std::io::Cursor;
 
+use rmps::config::BytesMode;
 use serde::Serialize;
 
 use rmp_serde::encode::{self, Error};
@@ -158,7 +159,6 @@ fn pass_i64_most_effective() {
     assert_eq!([0xcc, 0x80], buf);
 }
 
-
 #[test]
 fn pass_f32() {
     let mut buf = [0x00, 0x00, 0x00, 0x00, 0x00];
@@ -207,6 +207,45 @@ fn pass_tuple() {
     val.serialize(&mut Serializer::new(&mut &mut buf[..])).ok().unwrap();
 
     assert_eq!([0x92, 0x2a, 0xce, 0x0, 0x1, 0x88, 0x94], buf);
+}
+
+#[test]
+fn pass_tuple_not_bytes() {
+    let mut buf = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+    let val = (42u32, 100500u32);
+    val.serialize(&mut Serializer::new(&mut &mut buf[..]).with_bytes(BytesMode::ForceAll)).ok().unwrap();
+
+    assert_eq!([0x92, 0x2a, 0xce, 0x0, 0x1, 0x88, 0x94], buf);
+}
+
+#[test]
+fn pass_tuple_bytes() {
+    let mut buf = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+    let val = (1u8, 100u8, 200u8, 254u8);
+    val.serialize(&mut Serializer::new(&mut &mut buf[..]).with_bytes(BytesMode::ForceAll)).ok().unwrap();
+
+    assert_eq!([196, 4, 1, 100, 200, 254], buf);
+}
+
+#[test]
+fn pass_hash_array_bytes() {
+    use std::collections::HashSet;
+    let mut buf = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+    let val = [[255u8; 3], [1u8; 3]].into_iter().collect::<HashSet<[u8; 3]>>();
+    val.serialize(&mut Serializer::new(&mut &mut buf[..]).with_bytes(BytesMode::ForceAll)).ok().unwrap();
+}
+
+#[test]
+fn pass_tuple_low_bytes() {
+    let mut buf = [0x00, 0x00, 0x00, 0x00, 0x00];
+
+    let val = (1u8, 2, 3, 127);
+    val.serialize(&mut Serializer::new(&mut &mut buf[..]).with_bytes(BytesMode::ForceAll)).ok().unwrap();
+
+    assert_eq!([148, 1, 2, 3, 127], buf);
 }
 
 #[test]
@@ -301,8 +340,10 @@ fn pass_bin() {
 #[test]
 fn pass_to_vec() {
     assert_eq!(vec![0xc0], encode::to_vec(&()).unwrap());
-    assert_eq!(vec![0xaa, 0x6c, 0x65, 0x20, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65],
-        encode::to_vec("le message").unwrap());
+    assert_eq!(
+        vec![0xaa, 0x6c, 0x65, 0x20, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65],
+        encode::to_vec("le message").unwrap()
+    );
 }
 
 #[test]

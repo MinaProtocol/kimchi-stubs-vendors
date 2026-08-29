@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.56"
+rust-version = "1.88.0"
 name = "darling"
-version = "0.20.11"
+version = "0.23.0"
 authors = ["Ted Driggs <ted.driggs@outlook.com>"]
 build = false
 exclude = [
@@ -30,10 +30,19 @@ description = """
 A proc-macro library for reading attributes into structs when
 implementing custom derives.
 """
-documentation = "https://docs.rs/darling/0.20.11"
+documentation = "https://docs.rs/darling/0.23.0"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/TedDriggs/darling"
+
+[badges.maintenance]
+status = "actively-developed"
+
+[features]
+default = ["suggestions"]
+diagnostics = ["darling_core/diagnostics"]
+serde = ["darling_core/serde"]
+suggestions = ["darling_core/suggestions"]
 
 [lib]
 name = "darling"
@@ -48,12 +57,20 @@ name = "consume_fields"
 path = "examples/consume_fields.rs"
 
 [[example]]
+name = "enum_of_struct_variants"
+path = "examples/enum_of_struct_variants.rs"
+
+[[example]]
 name = "expr_with"
 path = "examples/expr_with.rs"
 
 [[example]]
 name = "fallible_read"
 path = "examples/fallible_read.rs"
+
+[[example]]
+name = "from_word_and_expr"
+path = "examples/from_word_and_expr.rs"
 
 [[example]]
 name = "heterogeneous_enum_and_word"
@@ -156,6 +173,10 @@ name = "generics"
 path = "tests/generics.rs"
 
 [[test]]
+name = "generics_with"
+path = "tests/generics_with.rs"
+
+[[test]]
 name = "happy_path"
 path = "tests/happy_path.rs"
 
@@ -174,6 +195,10 @@ path = "tests/multiple.rs"
 [[test]]
 name = "newtype"
 path = "tests/newtype.rs"
+
+[[test]]
+name = "override_callable"
+path = "tests/override_callable.rs"
 
 [[test]]
 name = "skip"
@@ -200,10 +225,10 @@ name = "unsupported_attributes"
 path = "tests/unsupported_attributes.rs"
 
 [dependencies.darling_core]
-version = "=0.20.11"
+version = "=0.23.0"
 
 [dependencies.darling_macro]
-version = "=0.20.11"
+version = "=0.23.0"
 
 [dev-dependencies.proc-macro2]
 version = "1.0.86"
@@ -214,19 +239,11 @@ version = "1.0.18"
 [dev-dependencies.syn]
 version = "2.0.15"
 
-[features]
-default = ["suggestions"]
-diagnostics = ["darling_core/diagnostics"]
-suggestions = ["darling_core/suggestions"]
-
 [target."cfg(compiletests)".dev-dependencies.rustversion]
 version = "1.0.9"
 
 [target."cfg(compiletests)".dev-dependencies.trybuild]
 version = "1.0.89"
-
-[badges.maintenance]
-status = "actively-developed"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

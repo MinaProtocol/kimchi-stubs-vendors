@@ -15,6 +15,35 @@ enum Pattern {
 fn expansion() {}
 
 #[test]
+fn unknown_value_includes_suggestion() {
+    #[derive(Debug, FromMeta)]
+    #[allow(dead_code)]
+    struct Test {
+        pattern: Pattern,
+    }
+
+    let small_err = Test::from_meta(&parse_quote!(na(pattern = "oned")))
+        .expect_err("`oned` should not be a valid pattern")
+        .to_string();
+
+    // Make sure we're referring to it as a value and not a field
+    assert!(small_err.contains("Unknown value"));
+
+    // If did-you-mean suggestions are enabled, then this one won't include all the alternates,
+    // but it will contain the close value.
+    assert!(small_err.contains("`owned`"));
+
+    let big_err = Test::from_meta(&parse_quote!(na(pattern = "fail")))
+        .expect_err("`fail` should not be a valid pattern`")
+        .to_string();
+
+    // Regardless of whether suggestions are enabled, this should include all the alternates.
+    assert!(big_err.contains("`owned`"));
+    assert!(big_err.contains("`mutable`"));
+    assert!(big_err.contains("`immutable`"));
+}
+
+#[test]
 fn rejected_in_unit_enum_variants() {
     #[derive(Debug, FromMeta, PartialEq)]
     struct Opts {
@@ -42,7 +71,7 @@ fn rejected_in_unit_enum_variants() {
                                 .to_string(),
                         )
                         .map_err(|e| e.with_span(path)),
-                        Meta::List(list) => Choice::from_list(&[item.clone()])
+                        Meta::List(list) => Choice::from_list(std::slice::from_ref(item))
                             .map_err(|e| e.with_span(&list.span())),
                         Meta::NameValue(n) => Err(darling::Error::custom(
                             "choice options are not set as name-value, use parentheses",

@@ -36,10 +36,11 @@ doctest = false
 version = "0.1.13"
 
 [dependencies.ocaml]
-version = "0.22.4"
+version = "1.3.0"
 
 [dependencies.ocaml-gen-derive]
 version = "1.0.0"
+path = "./derive"
 
 [dependencies.paste]
 version = "1.0.9"

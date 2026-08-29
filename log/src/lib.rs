@@ -142,6 +142,7 @@
 //!     * [stderrlog]
 //!     * [flexi_logger]
 //!     * [call_logger]
+//!     * [std-logger]
 //!     * [structured-logger]
 //!     * [clang_log]
 //!     * [ftail]
@@ -166,6 +167,7 @@
 //! * Utilities:
 //!     * [log_err]
 //!     * [log-reload]
+//!     * [alterable_logger]
 //!
 //! # Implementing a Logger
 //!
@@ -228,12 +230,12 @@
 //! Implementations that adjust their configurations at runtime should take care
 //! to adjust the maximum log level as well.
 //!
-//! # Use with `std`
+//! # Use with `alloc`
 //!
 //! `set_logger` requires you to provide a `&'static Log`, which can be hard to
 //! obtain if your logger depends on some runtime configuration. The
-//! `set_boxed_logger` function is available with the `std` Cargo feature. It is
-//! identical to `set_logger` except that it takes a `Box<Log>` rather than a
+//! `set_boxed_logger` function is available with the `alloc` Cargo feature. It
+//! is identical to `set_logger` except that it takes a `Box<Log>` rather than a
 //! `&'static Log`:
 //!
 //! ```
@@ -245,7 +247,11 @@
 //! #   fn flush(&self) {}
 //! # }
 //! # fn main() {}
-//! # #[cfg(feature = "std")]
+//! # #[cfg(feature = "alloc")]
+//! # extern crate alloc;
+//! # #[cfg(feature = "alloc")]
+//! # use alloc::boxed::Box;
+//! # #[cfg(feature = "alloc")]
 //! pub fn init() -> Result<(), SetLoggerError> {
 //!     log::set_boxed_logger(Box::new(SimpleLogger))
 //!         .map(|()| log::set_max_level(LevelFilter::Info))
@@ -291,8 +297,9 @@
 //! The following crate feature flags are available in addition to the filters. They are
 //! configured in your `Cargo.toml`.
 //!
-//! * `std` allows use of `std` crate instead of the default `core`. Enables using `std::error` and
-//!   `set_boxed_logger` functionality.
+//! * `alloc` enables using `alloc::boxed::Box` and `set_boxed_logger`.
+//! * `std` enables `alloc` and allows use of the `std` crate instead of the default `core`.
+//!   It also enables using `std::error`.
 //! * `serde` enables support for serialization and deserialization of `Level` and `LevelFilter`.
 //!
 //! ```toml
@@ -322,6 +329,7 @@
 //! [stderrlog]: https://docs.rs/stderrlog/*/stderrlog/
 //! [flexi_logger]: https://docs.rs/flexi_logger/*/flexi_logger/
 //! [call_logger]: https://docs.rs/call_logger/*/call_logger/
+//! [std-logger]: https://docs.rs/std-logger/*/std_logger/
 //! [syslog]: https://docs.rs/syslog/*/syslog/
 //! [slog-stdlog]: https://docs.rs/slog-stdlog/*/slog_stdlog/
 //! [log4rs]: https://docs.rs/log4rs/*/log4rs/
@@ -338,13 +346,14 @@
 //! [logcontrol-log]: https://docs.rs/logcontrol-log/*/logcontrol_log/
 //! [log_err]: https://docs.rs/log_err/*/log_err/
 //! [log-reload]: https://docs.rs/log-reload/*/log_reload/
+//! [alterable_logger]: https://docs.rs/alterable_logger/*/alterable_logger
 //! [clang_log]: https://docs.rs/clang_log/latest/clang_log
 //! [ftail]: https://docs.rs/ftail/latest/ftail
 
 #![doc(
-    html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
-    html_favicon_url = "https://www.rust-lang.org/favicon.ico",
-    html_root_url = "https://docs.rs/log/0.4.27"
+    html_logo_url = "https://prev.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
+    html_favicon_url = "https://prev.rust-lang.org/favicon.ico",
+    html_root_url = "https://docs.rs/log/0.4.34"
 )]
 #![warn(missing_docs)]
 #![deny(missing_debug_implementations, unconditional_recursion)]
@@ -389,9 +398,13 @@ compile_error!("multiple max_level_* features set");
 ))]
 compile_error!("multiple release_max_level_* features set");
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
 #[cfg(all(not(feature = "std"), not(test)))]
 extern crate core as std;
 
+#[cfg(feature = "alloc")]
+use alloc::boxed::Box;
 use std::cfg;
 #[cfg(feature = "std")]
 use std::error;
@@ -430,21 +443,6 @@ impl AtomicUsize {
 
     fn store(&self, val: usize, _order: Ordering) {
         self.v.set(val)
-    }
-
-    #[cfg(target_has_atomic = "ptr")]
-    fn compare_exchange(
-        &self,
-        current: usize,
-        new: usize,
-        _success: Ordering,
-        _failure: Ordering,
-    ) -> Result<usize, usize> {
-        let prev = self.v.get();
-        if current == prev {
-            self.v.set(new);
-        }
-        Ok(prev)
     }
 }
 
@@ -526,14 +524,13 @@ impl PartialOrd<LevelFilter> for Level {
 impl FromStr for Level {
     type Err = ParseLevelError;
     fn from_str(level: &str) -> Result<Level, Self::Err> {
-        LOG_LEVEL_NAMES
-            .iter()
-            .position(|&name| name.eq_ignore_ascii_case(level))
-            .into_iter()
-            .filter(|&idx| idx != 0)
-            .map(|idx| Level::from_usize(idx).unwrap())
-            .next()
-            .ok_or(ParseLevelError(()))
+        // iterate from 1, excluding "OFF"
+        for idx in 1..LOG_LEVEL_NAMES.len() {
+            if LOG_LEVEL_NAMES[idx].eq_ignore_ascii_case(level) {
+                return Ok(Level::from_usize(idx).unwrap());
+            }
+        }
+        Err(ParseLevelError(()))
     }
 }
 
@@ -591,6 +588,48 @@ impl Level {
     pub fn iter() -> impl Iterator<Item = Self> {
         (1..6).map(|i| Self::from_usize(i).unwrap())
     }
+
+    /// Get the next-highest `Level` from this one.
+    ///
+    /// If the current `Level` is at the highest level, the returned `Level` will be the same as the
+    /// current one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use log::Level;
+    ///
+    /// let level = Level::Info;
+    ///
+    /// assert_eq!(Level::Debug, level.increment_severity());
+    /// assert_eq!(Level::Trace, level.increment_severity().increment_severity());
+    /// assert_eq!(Level::Trace, level.increment_severity().increment_severity().increment_severity()); // max level
+    /// ```
+    pub fn increment_severity(&self) -> Self {
+        let current = *self as usize;
+        Self::from_usize(current + 1).unwrap_or(*self)
+    }
+
+    /// Get the next-lowest `Level` from this one.
+    ///
+    /// If the current `Level` is at the lowest level, the returned `Level` will be the same as the
+    /// current one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use log::Level;
+    ///
+    /// let level = Level::Info;
+    ///
+    /// assert_eq!(Level::Warn, level.decrement_severity());
+    /// assert_eq!(Level::Error, level.decrement_severity().decrement_severity());
+    /// assert_eq!(Level::Error, level.decrement_severity().decrement_severity().decrement_severity()); // min level
+    /// ```
+    pub fn decrement_severity(&self) -> Self {
+        let current = *self as usize;
+        Self::from_usize(current.saturating_sub(1)).unwrap_or(*self)
+    }
 }
 
 /// An enum representing the available verbosity level filters of the logger.
@@ -635,11 +674,13 @@ impl PartialOrd<Level> for LevelFilter {
 impl FromStr for LevelFilter {
     type Err = ParseLevelError;
     fn from_str(level: &str) -> Result<LevelFilter, Self::Err> {
-        LOG_LEVEL_NAMES
-            .iter()
-            .position(|&name| name.eq_ignore_ascii_case(level))
-            .map(|p| LevelFilter::from_usize(p).unwrap())
-            .ok_or(ParseLevelError(()))
+        // iterate from 0, including "OFF"
+        for idx in 0..LOG_LEVEL_NAMES.len() {
+            if LOG_LEVEL_NAMES[idx].eq_ignore_ascii_case(level) {
+                return Ok(LevelFilter::from_usize(idx).unwrap());
+            }
+        }
+        Err(ParseLevelError(()))
     }
 }
 
@@ -700,9 +741,52 @@ impl LevelFilter {
     pub fn iter() -> impl Iterator<Item = Self> {
         (0..6).map(|i| Self::from_usize(i).unwrap())
     }
+
+    /// Get the next-highest `LevelFilter` from this one.
+    ///
+    /// If the current `LevelFilter` is at the highest level, the returned `LevelFilter` will be the
+    /// same as the current one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use log::LevelFilter;
+    ///
+    /// let level_filter = LevelFilter::Info;
+    ///
+    /// assert_eq!(LevelFilter::Debug, level_filter.increment_severity());
+    /// assert_eq!(LevelFilter::Trace, level_filter.increment_severity().increment_severity());
+    /// assert_eq!(LevelFilter::Trace, level_filter.increment_severity().increment_severity().increment_severity()); // max level
+    /// ```
+    pub fn increment_severity(&self) -> Self {
+        let current = *self as usize;
+        Self::from_usize(current + 1).unwrap_or(*self)
+    }
+
+    /// Get the next-lowest `LevelFilter` from this one.
+    ///
+    /// If the current `LevelFilter` is at the lowest level, the returned `LevelFilter` will be the
+    /// same as the current one.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use log::LevelFilter;
+    ///
+    /// let level_filter = LevelFilter::Info;
+    ///
+    /// assert_eq!(LevelFilter::Warn, level_filter.decrement_severity());
+    /// assert_eq!(LevelFilter::Error, level_filter.decrement_severity().decrement_severity());
+    /// assert_eq!(LevelFilter::Off, level_filter.decrement_severity().decrement_severity().decrement_severity());
+    /// assert_eq!(LevelFilter::Off, level_filter.decrement_severity().decrement_severity().decrement_severity().decrement_severity()); // min level
+    /// ```
+    pub fn decrement_severity(&self) -> Self {
+        let current = *self as usize;
+        Self::from_usize(current.saturating_sub(1)).unwrap_or(*self)
+    }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+#[derive(Copy, Clone, Debug)]
 enum MaybeStaticStr<'a> {
     Static(&'static str),
     Borrowed(&'a str),
@@ -715,6 +799,32 @@ impl<'a> MaybeStaticStr<'a> {
             MaybeStaticStr::Static(s) => s,
             MaybeStaticStr::Borrowed(s) => s,
         }
+    }
+}
+
+impl Eq for MaybeStaticStr<'_> {}
+
+impl PartialEq for MaybeStaticStr<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
+
+impl Ord for MaybeStaticStr<'_> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.get().cmp(other.get())
+    }
+}
+
+impl PartialOrd for MaybeStaticStr<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::hash::Hash for MaybeStaticStr<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.get().hash(state);
     }
 }
 
@@ -868,7 +978,7 @@ impl<'a> Record<'a> {
     /// Create a new [`RecordBuilder`](struct.RecordBuilder.html) based on this record.
     #[cfg(feature = "kv")]
     #[inline]
-    pub fn to_builder(&self) -> RecordBuilder {
+    pub fn to_builder(&self) -> RecordBuilder<'_> {
         RecordBuilder {
             record: Record {
                 metadata: Metadata {
@@ -1232,8 +1342,8 @@ where
     }
 }
 
-#[cfg(feature = "std")]
-impl<T> Log for std::boxed::Box<T>
+#[cfg(feature = "alloc")]
+impl<T> Log for Box<T>
 where
     T: ?Sized + Log,
 {
@@ -1334,14 +1444,14 @@ pub fn max_level() -> LevelFilter {
 /// `Box<Log>` rather than a `&'static Log`. See the documentation for
 /// [`set_logger`] for more details.
 ///
-/// Requires the `std` feature.
+/// Requires the `alloc` feature.
 ///
 /// # Errors
 ///
 /// An error is returned if a logger has already been set.
 ///
 /// [`set_logger`]: fn.set_logger.html
-#[cfg(all(feature = "std", target_has_atomic = "ptr"))]
+#[cfg(all(feature = "alloc", target_has_atomic = "ptr"))]
 pub fn set_boxed_logger(logger: Box<dyn Log>) -> Result<(), SetLoggerError> {
     set_logger_inner(|| Box::leak(logger))
 }
@@ -1664,6 +1774,55 @@ mod tests {
     }
 
     #[test]
+    fn test_level_up() {
+        let info = Level::Info;
+        let up = info.increment_severity();
+        assert_eq!(up, Level::Debug);
+
+        let trace = Level::Trace;
+        let up = trace.increment_severity();
+        // trace is already highest level
+        assert_eq!(up, trace);
+    }
+
+    #[test]
+    fn test_level_filter_up() {
+        let info = LevelFilter::Info;
+        let up = info.increment_severity();
+        assert_eq!(up, LevelFilter::Debug);
+
+        let trace = LevelFilter::Trace;
+        let up = trace.increment_severity();
+        // trace is already highest level
+        assert_eq!(up, trace);
+    }
+
+    #[test]
+    fn test_level_down() {
+        let info = Level::Info;
+        let down = info.decrement_severity();
+        assert_eq!(down, Level::Warn);
+
+        let error = Level::Error;
+        let down = error.decrement_severity();
+        // error is already lowest level
+        assert_eq!(down, error);
+    }
+
+    #[test]
+    fn test_level_filter_down() {
+        let info = LevelFilter::Info;
+        let down = info.decrement_severity();
+        assert_eq!(down, LevelFilter::Warn);
+
+        let error = LevelFilter::Error;
+        let down = error.decrement_severity();
+        assert_eq!(down, LevelFilter::Off);
+        // Off is already the lowest
+        assert_eq!(down.decrement_severity(), down);
+    }
+
+    #[test]
     #[cfg_attr(not(debug_assertions), ignore)]
     fn test_static_max_level_debug() {
         if cfg!(feature = "max_level_off") {
@@ -1865,7 +2024,7 @@ mod tests {
 
         assert_is_log::<&dyn Log>();
 
-        #[cfg(feature = "std")]
+        #[cfg(feature = "alloc")]
         assert_is_log::<Box<dyn Log>>();
 
         #[cfg(feature = "std")]
@@ -1874,7 +2033,7 @@ mod tests {
         // Assert these statements for all T: Log + ?Sized
         #[allow(unused)]
         fn forall<T: Log + ?Sized>() {
-            #[cfg(feature = "std")]
+            #[cfg(feature = "alloc")]
             assert_is_log::<Box<T>>();
 
             assert_is_log::<&T>();

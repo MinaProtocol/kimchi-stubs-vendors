@@ -12,7 +12,7 @@
 
 include!("include.rs");
 
-// TODO(#847): Make this test succeed on earlier Rust versions.
+// FIXME(#847): Make this test succeed on earlier Rust versions.
 #[::rustversion::stable(1.59)]
 mod test {
     use super::*;
@@ -25,10 +25,12 @@ mod test {
     // types).
 
     #[derive(imp::KnownLayout, imp::IntoBytes, imp::FromZeros, imp::FromBytes, imp::Unaligned)]
+    #[zerocopy(crate = "zerocopy_renamed")]
     #[repr(C)]
     pub struct Public(Private);
 
     #[derive(imp::KnownLayout, imp::IntoBytes, imp::FromZeros, imp::FromBytes, imp::Unaligned)]
+    #[zerocopy(crate = "zerocopy_renamed")]
     #[repr(C)]
     struct Private(());
 }

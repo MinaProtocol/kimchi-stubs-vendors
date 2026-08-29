@@ -10,22 +10,47 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2018"
+edition = "2021"
 name = "ocaml-sys"
-version = "0.22.3"
+version = "0.26.0"
 authors = ["Zach Shipko <zachshipko@gmail.com>"]
+build = "build.rs"
+links = "asmrun"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Low-level OCaml bindings for Rust"
 documentation = "https://docs.rs/ocaml-sys"
-keywords = ["ocaml", "rust", "ffi"]
+readme = false
+keywords = [
+    "ocaml",
+    "rust",
+    "ffi",
+]
 license = "ISC"
 repository = "https://github.com/zshipko/ocaml-rs"
+
 [package.metadata.docs.rs]
-features = ["without-ocamlopt", "caml-state"]
+features = [
+    "without-ocamlopt",
+    "ocaml5",
+]
+
+[lib]
+name = "ocaml_sys"
+path = "src/lib.rs"
+
 [dependencies.cty]
 version = "0.2"
+
+[build-dependencies.cc]
+version = "1"
 
 [features]
 caml-state = []
 default = []
 link = []
+ocaml5 = []
 without-ocamlopt = []

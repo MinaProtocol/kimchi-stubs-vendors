@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.22.0] - 2026-08-09
+
+No changes.
+
+## [3.21.0] - 2026-06-04
+
+No changes.
+
+## [3.20.0] - 2026-05-10
+
+No changes.
+
+## [3.19.0] - 2026-05-02
+
+No changes.
+
+## [3.18.0] - 2026-03-13
+
+### Changed
+
+* Bump MSRV to 1.88 due to the `darling` dependency
+
+## [3.17.0] - 2026-02-24
+
+### Fixed
+
+* Fix example for `SerializeDisplayAlt`.
+    Remove unsupported attributes from example.
+
+## [3.16.1] - 2025-11-27
+
+No changes.
+
+## [3.16.0] - 2025-11-14
+
+No changes.
+
+## [3.15.1] - 2025-10-21
+
+No changes.
+
+## [3.15.0] - 2025-10-03
+
+No changes.
+
+## [3.14.1] - 2025-09-19
+
+### Fixed
+
+* Show macro expansion in the docs.rs generated rustdoc.
+    Since macros are used to generate trait implementations, this is useful to understand the exact generated code.
+
+## [3.14.0] - 2025-06-30
+
+### Added
+
+* Added support for `schemars` v1 under the `schemars_1` feature flag
+
+## [3.13.0] - 2025-06-14
+
+### Added
+
+* Introduce `SerializeDisplayAlt` derive macro (#833)
+    An alternative to the `SerializeDisplay` macro except instead of using the
+    plain formatting like `format!("{}", ...)`, it serializes with the
+    `Formatter::alternate` flag set to true, like `format!("{:#}", ...)`
+
 ## [3.12.0] - 2024-12-25
 
 No changes.

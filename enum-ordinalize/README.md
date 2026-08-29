@@ -5,6 +5,12 @@ Enum Ordinalize
 
 This library enables enums to not only obtain the ordinal values of their variants but also allows for the construction of enums from an ordinal value.
 
+## Feature Flags
+
+The default features are `derive` and `traits`. The `derive` feature re-exports the `Ordinalize` derive macro, and the `traits` feature exposes the `Ordinalize` trait and enables the derive macro to implement it automatically.
+
+When only `derive` is enabled, the macro can still generate inherent constants and functions with the `#[ordinalize(...)]` attributes shown below, but it will not implement the `Ordinalize` trait.
+
 ## Usage
 
 Use `#[derive(Ordinalize)]` to have an enum (which must only has unit variants) implement the `Ordinalize` trait.
@@ -34,6 +40,51 @@ assert_eq!(Some(MyEnum::Two), MyEnum::from_ordinal(2i8));
 assert_eq!(MyEnum::Zero, unsafe { MyEnum::from_ordinal_unsafe(0i8) });
 assert_eq!(MyEnum::One, unsafe { MyEnum::from_ordinal_unsafe(1i8) });
 assert_eq!(MyEnum::Two, unsafe { MyEnum::from_ordinal_unsafe(2i8) });
+```
+
+#### Quickly Implement `Serialize` and `Deserialize`
+
+The `Ordinalize` trait can be used to serialize an enum as its ordinal value and safely reject unknown values during deserialization. Add `serde` to your dependencies:
+
+```toml
+serde = { version = "1", default-features = false }
+```
+
+Then implement the traits using `ordinal` and `from_ordinal`:
+
+```rust
+use enum_ordinalize::Ordinalize;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+#[derive(Debug, PartialEq, Eq, Ordinalize)]
+#[repr(i8)]
+enum MyEnum {
+    Zero,
+    One,
+    Two,
+}
+
+impl Serialize for MyEnum {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i8(self.ordinal())
+    }
+}
+
+impl<'de> Deserialize<'de> for MyEnum {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ordinal = i8::deserialize(deserializer)?;
+
+        Self::from_ordinal(ordinal).ok_or_else(|| {
+            <D::Error as serde::de::Error>::custom("invalid ordinal for MyEnum")
+        })
+    }
+}
 ```
 
 #### The (Ordinal) Size of an Enum
@@ -102,6 +153,8 @@ assert_eq!(MyEnum::Zero, unsafe { MyEnum::from_ordinal_unsafe(0usize) });
 assert_eq!(MyEnum::One, unsafe { MyEnum::from_ordinal_unsafe(1usize) });
 assert_eq!(MyEnum::Two, unsafe { MyEnum::from_ordinal_unsafe(2usize) });
 ```
+
+Path constants, casts, binary expressions, and const fn calls used as discriminants require an explicit integer `#[repr(...)]` because the derive macro cannot evaluate them while choosing the ordinal type.
 
 #### Useful Increment
 

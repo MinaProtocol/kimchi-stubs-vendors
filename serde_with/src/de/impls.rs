@@ -4,10 +4,16 @@ use crate::{formats::*, prelude::*};
 use hashbrown_0_14::{HashMap as HashbrownMap014, HashSet as HashbrownSet014};
 #[cfg(feature = "hashbrown_0_15")]
 use hashbrown_0_15::{HashMap as HashbrownMap015, HashSet as HashbrownSet015};
+#[cfg(feature = "hashbrown_0_16")]
+use hashbrown_0_16::{HashMap as HashbrownMap016, HashSet as HashbrownSet016};
+#[cfg(feature = "hashbrown_0_17")]
+use hashbrown_0_17::{HashMap as HashbrownMap017, HashSet as HashbrownSet017};
 #[cfg(feature = "indexmap_1")]
 use indexmap_1::{IndexMap, IndexSet};
 #[cfg(feature = "indexmap_2")]
 use indexmap_2::{IndexMap as IndexMap2, IndexSet as IndexSet2};
+#[cfg(feature = "smallvec_1")]
+use smallvec_1::SmallVec;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helper macro used internally
@@ -27,27 +33,37 @@ pub(crate) mod macros {
             #[cfg(feature = "std")]
             $m!(
                 HashMap<K: Eq + Hash, V, S: BuildHasher + Default>,
-                (|size| HashMap::with_capacity_and_hasher(size, Default::default()))
+                (|size| HashMap::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
             );
             #[cfg(feature = "hashbrown_0_14")]
             $m!(
                 HashbrownMap014<K: Eq + Hash, V, S: BuildHasher + Default>,
-                (|size| HashbrownMap014::with_capacity_and_hasher(size, Default::default()))
+                (|size| HashbrownMap014::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
             );
             #[cfg(feature = "hashbrown_0_15")]
             $m!(
                 HashbrownMap015<K: Eq + Hash, V, S: BuildHasher + Default>,
-                (|size| HashbrownMap015::with_capacity_and_hasher(size, Default::default()))
+                (|size| HashbrownMap015::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
+            );
+            #[cfg(feature = "hashbrown_0_16")]
+            $m!(
+                HashbrownMap016<K: Eq + Hash, V, S: BuildHasher + Default>,
+                (|size| HashbrownMap016::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
+            );
+            #[cfg(feature = "hashbrown_0_17")]
+            $m!(
+                HashbrownMap017<K: Eq + Hash, V, S: BuildHasher + Default>,
+                (|size| HashbrownMap017::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
             );
             #[cfg(feature = "indexmap_1")]
             $m!(
                 IndexMap<K: Eq + Hash, V, S: BuildHasher + Default>,
-                (|size| IndexMap::with_capacity_and_hasher(size, Default::default()))
+                (|size| IndexMap::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
             );
             #[cfg(feature = "indexmap_2")]
             $m!(
                 IndexMap2<K: Eq + Hash, V, S: BuildHasher + Default>,
-                (|size| IndexMap2::with_capacity_and_hasher(size, Default::default()))
+                (|size| IndexMap2::with_capacity_and_hasher(crate::utils::size_hint_cautious::<(K,V)>(Some(size)), Default::default()))
             );
         };
     }
@@ -59,31 +75,43 @@ pub(crate) mod macros {
             #[cfg(feature = "std")]
             $m!(
                 HashSet<T: Eq + Hash, S: BuildHasher + Default>,
-                (|size| HashSet::with_capacity_and_hasher(size, S::default())),
+                (|size| HashSet::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
                 insert
             );
             #[cfg(feature = "hashbrown_0_14")]
             $m!(
                 HashbrownSet014<T: Eq + Hash, S: BuildHasher + Default>,
-                (|size| HashbrownSet014::with_capacity_and_hasher(size, S::default())),
+                (|size| HashbrownSet014::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
                 insert
             );
             #[cfg(feature = "hashbrown_0_15")]
             $m!(
                 HashbrownSet015<T: Eq + Hash, S: BuildHasher + Default>,
-                (|size| HashbrownSet015::with_capacity_and_hasher(size, S::default())),
+                (|size| HashbrownSet015::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
+                insert
+            );
+            #[cfg(feature = "hashbrown_0_16")]
+            $m!(
+                HashbrownSet016<T: Eq + Hash, S: BuildHasher + Default>,
+                (|size| HashbrownSet016::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
+                insert
+            );
+            #[cfg(feature = "hashbrown_0_17")]
+            $m!(
+                HashbrownSet017<T: Eq + Hash, S: BuildHasher + Default>,
+                (|size| HashbrownSet017::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
                 insert
             );
             #[cfg(feature = "indexmap_1")]
             $m!(
                 IndexSet<T: Eq + Hash, S: BuildHasher + Default>,
-                (|size| IndexSet::with_capacity_and_hasher(size, S::default())),
+                (|size| IndexSet::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
                 insert
             );
             #[cfg(feature = "indexmap_2")]
             $m!(
                 IndexSet2<T: Eq + Hash, S: BuildHasher + Default>,
-                (|size| IndexSet2::with_capacity_and_hasher(size, S::default())),
+                (|size| IndexSet2::with_capacity_and_hasher(crate::utils::size_hint_cautious::<T>(Some(size)), S::default())),
                 insert
             );
         };
@@ -96,19 +124,19 @@ pub(crate) mod macros {
             #[cfg(feature = "alloc")]
             $m!(
                 BinaryHeap<T: Ord>,
-                (|size| BinaryHeap::with_capacity(size)),
+                (|size| BinaryHeap::with_capacity(crate::utils::size_hint_cautious::<T>(Some(size)))),
                 push
             );
             #[cfg(feature = "alloc")]
-            $m!(BoxedSlice<T>, (|size| Vec::with_capacity(size)), push);
+            $m!(BoxedSlice<T>, (|size| crate::utils::vec_with_capacity_cautious(Some(size))), push);
             #[cfg(feature = "alloc")]
             $m!(LinkedList<T>, (|_| LinkedList::new()), push_back);
             #[cfg(feature = "alloc")]
-            $m!(Vec<T>, (|size| Vec::with_capacity(size)), push);
+            $m!(Vec<T>, (|size| crate::utils::vec_with_capacity_cautious(Some(size))), push);
             #[cfg(feature = "alloc")]
             $m!(
                 VecDeque<T>,
-                (|size| VecDeque::with_capacity(size)),
+                (|size| VecDeque::with_capacity(crate::utils::size_hint_cautious::<T>(Some(size)))),
                 push_back
             );
         };
@@ -410,6 +438,78 @@ where
 
 // endregion
 ///////////////////////////////////////////////////////////////////////////////
+// region: More complex wrappers that are not just a single value
+
+impl<'de, Idx, IdxAs> DeserializeAs<'de, Range<Idx>> for Range<IdxAs>
+where
+    IdxAs: DeserializeAs<'de, Idx>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<Range<Idx>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let Range::<DeserializeAsWrap<Idx, IdxAs>> { start, end } =
+            Deserialize::deserialize(deserializer)?;
+
+        Ok(Range {
+            start: start.into_inner(),
+            end: end.into_inner(),
+        })
+    }
+}
+
+impl<'de, Idx, IdxAs> DeserializeAs<'de, RangeFrom<Idx>> for RangeFrom<IdxAs>
+where
+    IdxAs: DeserializeAs<'de, Idx>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<RangeFrom<Idx>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let RangeFrom::<DeserializeAsWrap<Idx, IdxAs>> { start } =
+            Deserialize::deserialize(deserializer)?;
+
+        Ok(RangeFrom {
+            start: start.into_inner(),
+        })
+    }
+}
+
+impl<'de, Idx, IdxAs> DeserializeAs<'de, RangeInclusive<Idx>> for RangeInclusive<IdxAs>
+where
+    IdxAs: DeserializeAs<'de, Idx>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<RangeInclusive<Idx>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let (start, end) =
+            RangeInclusive::<DeserializeAsWrap<Idx, IdxAs>>::deserialize(deserializer)?
+                .into_inner();
+
+        Ok(RangeInclusive::new(start.into_inner(), end.into_inner()))
+    }
+}
+
+impl<'de, Idx, IdxAs> DeserializeAs<'de, RangeTo<Idx>> for RangeTo<IdxAs>
+where
+    IdxAs: DeserializeAs<'de, Idx>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<RangeTo<Idx>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let RangeTo::<DeserializeAsWrap<Idx, IdxAs>> { end } =
+            Deserialize::deserialize(deserializer)?;
+
+        Ok(RangeTo {
+            end: end.into_inner(),
+        })
+    }
+}
+
+// endregion
+///////////////////////////////////////////////////////////////////////////////
 // region: Collection Types (e.g., Maps, Sets, Vec)
 
 #[cfg(feature = "alloc")]
@@ -472,6 +572,58 @@ macro_rules! seq_impl {
     };
 }
 foreach_seq!(seq_impl);
+
+// SmallVec implementation
+#[cfg(feature = "smallvec_1")]
+impl<'de, A, B> DeserializeAs<'de, SmallVec<A>> for SmallVec<B>
+where
+    A: smallvec_1::Array,
+    B: smallvec_1::Array,
+    B::Item: DeserializeAs<'de, A::Item>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<SmallVec<A>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SmallVecVisitor<A, B> {
+            marker: PhantomData<(A, B)>,
+        }
+
+        impl<'de, A, B> Visitor<'de> for SmallVecVisitor<A, B>
+        where
+            A: smallvec_1::Array,
+            B: smallvec_1::Array,
+            B::Item: DeserializeAs<'de, A::Item>,
+        {
+            type Value = SmallVec<A>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a sequence")
+            }
+
+            fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+            where
+                S: SeqAccess<'de>,
+            {
+                let mut values = SmallVec::new();
+
+                while let Some(value) = seq
+                    .next_element()?
+                    .map(|v: DeserializeAsWrap<A::Item, B::Item>| v.into_inner())
+                {
+                    values.push(value);
+                }
+
+                Ok(values)
+            }
+        }
+
+        let visitor = SmallVecVisitor::<A, B> {
+            marker: PhantomData,
+        };
+        deserializer.deserialize_seq(visitor)
+    }
+}
 
 #[cfg(feature = "alloc")]
 macro_rules! map_impl {
@@ -965,6 +1117,39 @@ where
     }
 }
 
+macro_rules! none_as_zero_deserialize {
+    ($($nonzero:ident => $primitive:ident),* $(,)?) => {
+        $(
+            impl<'de> DeserializeAs<'de, Option<core::num::$nonzero>> for NoneAsZero {
+                fn deserialize_as<D>(
+                    deserializer: D,
+                ) -> Result<Option<core::num::$nonzero>, D::Error>
+                where
+                    D: Deserializer<'de>,
+                {
+                    let value = <$primitive>::deserialize(deserializer)?;
+                    Ok(core::num::$nonzero::new(value))
+                }
+            }
+        )*
+    };
+}
+
+none_as_zero_deserialize! {
+    NonZeroU8    => u8,
+    NonZeroU16   => u16,
+    NonZeroU32   => u32,
+    NonZeroU64   => u64,
+    NonZeroU128  => u128,
+    NonZeroUsize => usize,
+    NonZeroI8    => i8,
+    NonZeroI16   => i16,
+    NonZeroI32   => i32,
+    NonZeroI64   => i64,
+    NonZeroI128  => i128,
+    NonZeroIsize => isize,
+}
+
 #[cfg(feature = "alloc")]
 impl<'de, T, TAs> DeserializeAs<'de, T> for DefaultOnError<TAs>
 where
@@ -1082,7 +1267,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 macro_rules! use_signed_duration {
     (
         $main_trait:ident $internal_trait:ident =>
@@ -1116,7 +1300,6 @@ macro_rules! use_signed_duration {
     };
 }
 
-#[cfg(feature = "std")]
 use_signed_duration!(
     DurationSeconds DurationSeconds,
     DurationMilliSeconds DurationMilliSeconds,
@@ -1125,12 +1308,32 @@ use_signed_duration!(
     => {
         Duration; to_std_duration =>
         {u64, Strict =>}
-        {f64, Strict =>}
-        {String, Strict =>}
         {FORMAT, Flexible => FORMAT: Format}
     }
 );
+#[cfg(feature = "alloc")]
+use_signed_duration!(
+    DurationSeconds DurationSeconds,
+    DurationMilliSeconds DurationMilliSeconds,
+    DurationMicroSeconds DurationMicroSeconds,
+    DurationNanoSeconds DurationNanoSeconds,
+    => {
+        Duration; to_std_duration =>
+        {String, Strict =>}
+    }
+);
 #[cfg(feature = "std")]
+use_signed_duration!(
+    DurationSeconds DurationSeconds,
+    DurationMilliSeconds DurationMilliSeconds,
+    DurationMicroSeconds DurationMicroSeconds,
+    DurationNanoSeconds DurationNanoSeconds,
+    => {
+        Duration; to_std_duration =>
+        // round() only works on std
+        {f64, Strict =>}
+    }
+);
 use_signed_duration!(
     DurationSecondsWithFrac DurationSecondsWithFrac,
     DurationMilliSecondsWithFrac DurationMilliSecondsWithFrac,
@@ -1139,8 +1342,18 @@ use_signed_duration!(
     => {
         Duration; to_std_duration =>
         {f64, Strict =>}
-        {String, Strict =>}
         {FORMAT, Flexible => FORMAT: Format}
+    }
+);
+#[cfg(feature = "alloc")]
+use_signed_duration!(
+    DurationSecondsWithFrac DurationSecondsWithFrac,
+    DurationMilliSecondsWithFrac DurationMilliSecondsWithFrac,
+    DurationMicroSecondsWithFrac DurationMicroSecondsWithFrac,
+    DurationNanoSecondsWithFrac DurationNanoSecondsWithFrac,
+    => {
+        Duration; to_std_duration =>
+        {String, Strict =>}
     }
 );
 
@@ -1538,12 +1751,61 @@ impl<'de, const N: usize> DeserializeAs<'de, Box<[u8; N]>> for Bytes {
 }
 
 #[cfg(feature = "alloc")]
-impl<'de, T, TAs, FORMAT> DeserializeAs<'de, Vec<T>> for OneOrMany<TAs, FORMAT>
+macro_rules! one_or_many_impl {
+    (
+        $ty:ident < T $(: $tbound1:ident $(+ $tbound2:ident)*)? $(, $typaram:ident : $bound1:ident $(+ $bound2:ident)* )* >,
+        $with_capacity:expr,
+        $append:ident
+    ) => {
+        impl<'de, T, TAs, FORMAT $(, $typaram)*> DeserializeAs<'de, $ty<T $(, $typaram)*>> for OneOrMany<TAs, FORMAT>
+        where
+            TAs: DeserializeAs<'de, T>,
+            FORMAT: Format,
+            $(T: $tbound1 $(+ $tbound2)*,)?
+            $($typaram: $bound1 $(+ $bound2)*),*
+        {
+            fn deserialize_as<D>(deserializer: D) -> Result<$ty<T $(, $typaram)*>, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let is_hr = deserializer.is_human_readable();
+                let content: content::de::Content<'de> = Deserialize::deserialize(deserializer)?;
+
+                let one_err: D::Error = match <DeserializeAsWrap<T, TAs>>::deserialize(
+                    content::de::ContentRefDeserializer::new(&content, is_hr),
+                ) {
+                    Ok(one) => {
+                        #[allow(clippy::redundant_closure_call)]
+                        let mut values = ($with_capacity)(1);
+                        values.$append(one.into_inner());
+                        return Ok(values.into());
+                    }
+                    Err(err) => err,
+                };
+                let many_err: D::Error = match <DeserializeAsWrap<$ty<T $(, $typaram)*>, $ty<TAs $(, $typaram)*>>>::deserialize(
+                    content::de::ContentDeserializer::new(content, is_hr),
+                ) {
+                    Ok(many) => return Ok(many.into_inner()),
+                    Err(err) => err,
+                };
+                Err(DeError::custom(format_args!(
+                    "OneOrMany could not deserialize any variant:\n  One: {one_err}\n  Many: {many_err}"
+                )))
+            }
+        }
+    };
+}
+#[cfg(feature = "alloc")]
+foreach_seq!(one_or_many_impl);
+
+#[cfg(all(feature = "alloc", feature = "smallvec_1"))]
+impl<'de, T, TAs, FORMAT, A> DeserializeAs<'de, SmallVec<A>> for OneOrMany<TAs, FORMAT>
 where
+    A: smallvec_1::Array<Item = T>,
     TAs: DeserializeAs<'de, T>,
     FORMAT: Format,
 {
-    fn deserialize_as<D>(deserializer: D) -> Result<Vec<T>, D::Error>
+    fn deserialize_as<D>(deserializer: D) -> Result<SmallVec<A>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -1553,18 +1815,21 @@ where
         let one_err: D::Error = match <DeserializeAsWrap<T, TAs>>::deserialize(
             content::de::ContentRefDeserializer::new(&content, is_hr),
         ) {
-            Ok(one) => return Ok(alloc::vec![one.into_inner()]),
+            Ok(one) => {
+                let mut res = SmallVec::<A>::new();
+                res.push(one.into_inner());
+                return Ok(res);
+            }
             Err(err) => err,
         };
         let many_err: D::Error = match <DeserializeAsWrap<Vec<T>, Vec<TAs>>>::deserialize(
             content::de::ContentDeserializer::new(content, is_hr),
         ) {
-            Ok(many) => return Ok(many.into_inner()),
+            Ok(many) => return Ok(SmallVec::from_vec(many.into_inner())),
             Err(err) => err,
         };
         Err(DeError::custom(format_args!(
-            "OneOrMany could not deserialize any variant:\n  One: {}\n  Many: {}",
-            one_err, many_err
+            "OneOrMany could not deserialize any variant:\n  One: {one_err}\n  Many: {many_err}"
         )))
     }
 }
@@ -1608,8 +1873,7 @@ where
             Err(err) => err,
         };
         Err(DeError::custom(format_args!(
-            "PickFirst could not deserialize any variant:\n  First: {}\n  Second: {}",
-            first_err, second_err
+            "PickFirst could not deserialize any variant:\n  First: {first_err}\n  Second: {second_err}"
         )))
     }
 }
@@ -1647,8 +1911,7 @@ where
             Err(err) => err,
         };
         Err(DeError::custom(format_args!(
-            "PickFirst could not deserialize any variant:\n  First: {}\n  Second: {}\n  Third: {}",
-            first_err, second_err, third_err,
+            "PickFirst could not deserialize any variant:\n  First: {first_err}\n  Second: {second_err}\n  Third: {third_err}",
         )))
     }
 }
@@ -1693,8 +1956,7 @@ where
             Err(err) => err,
         };
         Err(DeError::custom(format_args!(
-            "PickFirst could not deserialize any variant:\n  First: {}\n  Second: {}\n  Third: {}\n  Fourth: {}",
-            first_err, second_err, third_err, fourth_err,
+            "PickFirst could not deserialize any variant:\n  First: {first_err}\n  Second: {second_err}\n  Third: {third_err}\n  Fourth: {fourth_err}",
         )))
     }
 }
@@ -1894,7 +2156,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                     unexp => {
                         let mut buf: [u8; 58] = [0u8; 58];
                         Err(DeError::invalid_value(
-                            crate::utils::get_unexpected_u128(unexp, &mut buf),
+                            utils::get_unexpected_u128(unexp, &mut buf),
                             &self,
                         ))
                     }
@@ -1911,7 +2173,7 @@ impl<'de> DeserializeAs<'de, bool> for BoolFromInt<Strict> {
                     unexp => {
                         let mut buf: [u8; 58] = [0u8; 58];
                         Err(DeError::invalid_value(
-                            crate::utils::get_unexpected_i128(unexp, &mut buf),
+                            utils::get_unexpected_i128(unexp, &mut buf),
                             &"0 or 1",
                         ))
                     }

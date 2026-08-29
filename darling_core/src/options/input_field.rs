@@ -30,7 +30,7 @@ impl InputField {
             ident: &self.ident,
             name_in_attr: self
                 .attr_name
-                .as_ref()
+                .as_deref()
                 .map_or_else(|| Cow::Owned(self.ident.to_string()), Cow::Borrowed),
             ty: &self.ty,
             default_expression: self.as_codegen_default(),
@@ -53,7 +53,9 @@ impl InputField {
     /// in the `Inherit` case.
     fn as_codegen_default(&self) -> Option<codegen::DefaultExpression<'_>> {
         self.default.as_ref().map(|expr| match *expr {
-            DefaultExpression::Explicit(ref path) => codegen::DefaultExpression::Explicit(path),
+            DefaultExpression::Explicit(ref callable) => {
+                codegen::DefaultExpression::Explicit(callable)
+            }
             DefaultExpression::Inherit => codegen::DefaultExpression::Inherit(&self.ident),
             DefaultExpression::Trait { span } => codegen::DefaultExpression::Trait { span },
         })

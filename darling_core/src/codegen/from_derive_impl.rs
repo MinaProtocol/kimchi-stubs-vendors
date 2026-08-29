@@ -13,7 +13,7 @@ use super::ForwardAttrs;
 
 pub struct FromDeriveInputImpl<'a> {
     pub ident: Option<&'a Ident>,
-    pub generics: Option<&'a Ident>,
+    pub generics: Option<&'a ForwardedField>,
     pub vis: Option<&'a Ident>,
     pub data: Option<&'a ForwardedField>,
     pub base: TraitImpl<'a>,
@@ -51,26 +51,49 @@ impl ToTokens for FromDeriveInputImpl<'_> {
             .as_ref()
             .map(|i| quote!(#i: #input.ident.clone(),));
         let passed_vis = self.vis.as_ref().map(|i| quote!(#i: #input.vis.clone(),));
-        let passed_generics = self
-            .generics
-            .as_ref()
-            .map(|i| quote!(#i: ::darling::FromGenerics::from_generics(&#input.generics)?,));
         let passed_attrs = self.forward_attrs.as_initializer();
-        let passed_body = self.data.as_ref().map(|i| {
-            let ForwardedField { ident, with } = i;
-            let path = match with {
-                Some(p) => quote!(#p),
-                None => quote_spanned!(ident.span()=> ::darling::ast::Data::try_from),
-            };
-            quote_spanned!(ident.span()=> #ident: #path(&#input.data)?,)
-        });
 
-        let supports = self.supports.map(|i| {
+        let read_generics = self.generics.map(|generics| {
+            let ident = &generics.ident;
+            let with = generics.with.as_ref().map(|p| quote!(#p)).unwrap_or_else(
+                || quote_spanned!(ident.span()=>::darling::FromGenerics::from_generics),
+            );
             quote! {
-                #i
-                __errors.handle(__validate_body(&#input.data));
+                let #ident = __errors.handle(#with(&#input.generics));
             }
         });
+
+        let pass_generics_to_receiver = self.generics.map(|g| g.as_initializer());
+
+        let check_shape = self
+            .supports
+            .map(|s| s.validator_path().into_token_stream())
+            .unwrap_or_else(|| quote!(::darling::export::Ok));
+
+        let read_data = self
+            .data
+            .as_ref()
+            .map(|i| match &i.with {
+                Some(p) => quote!(#p),
+                None => quote_spanned!(i.ident.span()=> ::darling::ast::Data::try_from),
+            })
+            .unwrap_or_else(|| quote!(::darling::export::Ok));
+
+        let supports = self.supports;
+        let validate_and_read_data = {
+            // If the caller wants `data` read into a field, we can use `data` as the local variable name
+            // because we know there are no other fields of that name.
+            let let_binding = self.data.map(|d| {
+                let ident = &d.ident;
+                quote!(let #ident = )
+            });
+            quote! {
+                #supports
+                #let_binding __errors.handle(#check_shape(&#input.data).and_then(#read_data));
+            }
+        };
+
+        let pass_data_to_receiver = self.data.map(|f| f.as_initializer());
 
         let inits = self.base.initializers();
         let default = if self.from_ident {
@@ -92,7 +115,9 @@ impl ToTokens for FromDeriveInputImpl<'_> {
 
                     #grab_attrs
 
-                    #supports
+                    #validate_and_read_data
+
+                    #read_generics
 
                     #require_fields
 
@@ -102,10 +127,10 @@ impl ToTokens for FromDeriveInputImpl<'_> {
 
                     ::darling::export::Ok(#ty_ident {
                         #passed_ident
-                        #passed_generics
+                        #pass_generics_to_receiver
                         #passed_vis
                         #passed_attrs
-                        #passed_body
+                        #pass_data_to_receiver
                         #inits
                     }) #post_transform
                 }

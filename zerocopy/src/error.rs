@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0 OR MIT
+//
 // Copyright 2024 The Fuchsia Authors
 //
 // Licensed under the 2-Clause BSD License <LICENSE-BSD or
@@ -115,15 +117,14 @@
 //!         .map_err(|err| err.to_string())
 //! }).join().unwrap();
 //! ```
+#[cfg(not(no_zerocopy_core_error_1_81_0))]
+use core::error::Error;
 use core::{
     convert::Infallible,
     fmt::{self, Debug, Write},
     ops::Deref,
 };
-
-#[cfg(zerocopy_core_error_1_81_0)]
-use core::error::Error;
-#[cfg(all(not(zerocopy_core_error_1_81_0), any(feature = "std", test)))]
+#[cfg(all(no_zerocopy_core_error_1_81_0, any(feature = "std", test)))]
 use std::error::Error;
 
 use crate::{util::SendSyncPhantomData, KnownLayout, TryFromBytes, Unaligned};
@@ -150,7 +151,7 @@ use crate::{FromBytes, Ref};
 /// - [`CastError`]: the error type of reference conversions
 /// - [`TryCastError`]: the error type of fallible reference conversions
 /// - [`TryReadError`]: the error type of fallible read conversions
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone)]
 pub enum ConvertError<A, S, V> {
     /// The conversion source was improperly aligned.
     Alignment(A),
@@ -198,7 +199,10 @@ impl<Src, Dst: ?Sized + Unaligned, S, V> From<ConvertError<AlignmentError<Src, D
     #[inline]
     fn from(err: ConvertError<AlignmentError<Src, Dst>, S, V>) -> ConvertError<Infallible, S, V> {
         match err {
-            ConvertError::Alignment(e) => ConvertError::Alignment(Infallible::from(e)),
+            ConvertError::Alignment(e) => {
+                #[allow(unreachable_code)]
+                return ConvertError::Alignment(Infallible::from(e));
+            }
             ConvertError::Size(e) => ConvertError::Size(e),
             ConvertError::Validity(e) => ConvertError::Validity(e),
         }
@@ -232,7 +236,7 @@ impl<A: fmt::Display, S: fmt::Display, V: fmt::Display> fmt::Display for Convert
     }
 }
 
-#[cfg(any(zerocopy_core_error_1_81_0, feature = "std", test))]
+#[cfg(any(not(no_zerocopy_core_error_1_81_0), feature = "std", test))]
 #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.81.0", feature = "std"))))]
 impl<A, S, V> Error for ConvertError<A, S, V>
 where
@@ -243,15 +247,14 @@ where
 }
 
 /// The error emitted if the conversion source is improperly aligned.
-#[derive(PartialEq, Eq)]
 pub struct AlignmentError<Src, Dst: ?Sized> {
     /// The source value involved in the conversion.
     src: Src,
-    /// The inner destination type inolved in the conversion.
+    /// The inner destination type involved in the conversion.
     ///
     /// INVARIANT: An `AlignmentError` may only be constructed if `Dst`'s
     /// alignment requirement is greater than one.
-    dst: SendSyncPhantomData<Dst>,
+    _dst: SendSyncPhantomData<Dst>,
 }
 
 impl<Src, Dst: ?Sized> AlignmentError<Src, Dst> {
@@ -262,7 +265,7 @@ impl<Src, Dst: ?Sized> AlignmentError<Src, Dst> {
     pub(crate) unsafe fn new_unchecked(src: Src) -> Self {
         // INVARIANT: The caller guarantees that `Dst`'s alignment requirement
         // is greater than one.
-        Self { src, dst: SendSyncPhantomData::default() }
+        Self { src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Produces the source underlying the failed conversion.
@@ -275,7 +278,7 @@ impl<Src, Dst: ?Sized> AlignmentError<Src, Dst> {
         // INVARIANT: `with_src` doesn't change the type of `Dst`, so the
         // invariant that `Dst`'s alignment requirement is greater than one is
         // preserved.
-        AlignmentError { src: new_src, dst: SendSyncPhantomData::default() }
+        AlignmentError { src: new_src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Maps the source value associated with the conversion error.
@@ -300,7 +303,7 @@ impl<Src, Dst: ?Sized> AlignmentError<Src, Dst> {
     /// ```
     #[inline]
     pub fn map_src<NewSrc>(self, f: impl FnOnce(Src) -> NewSrc) -> AlignmentError<NewSrc, Dst> {
-        AlignmentError { src: f(self.src), dst: SendSyncPhantomData::default() }
+        AlignmentError { src: f(self.src), _dst: SendSyncPhantomData::default() }
     }
 
     pub(crate) fn into<S, V>(self) -> ConvertError<Self, S, V> {
@@ -337,6 +340,22 @@ impl<Src, Dst: ?Sized> AlignmentError<Src, Dst> {
         Ok(())
     }
 }
+
+impl<Src: Clone, Dst: ?Sized> Clone for AlignmentError<Src, Dst> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self { src: self.src.clone(), _dst: SendSyncPhantomData::default() }
+    }
+}
+
+impl<Src: PartialEq, Dst: ?Sized> PartialEq for AlignmentError<Src, Dst> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.src == other.src
+    }
+}
+
+impl<Src: Eq, Dst: ?Sized> Eq for AlignmentError<Src, Dst> {}
 
 impl<Src, Dst: ?Sized + Unaligned> From<AlignmentError<Src, Dst>> for Infallible {
     #[inline(always)]
@@ -390,7 +409,7 @@ where
     }
 }
 
-#[cfg(any(zerocopy_core_error_1_81_0, feature = "std", test))]
+#[cfg(any(not(no_zerocopy_core_error_1_81_0), feature = "std", test))]
 #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.81.0", feature = "std"))))]
 impl<Src, Dst: ?Sized> Error for AlignmentError<Src, Dst>
 where
@@ -409,17 +428,16 @@ impl<Src, Dst: ?Sized, S, V> From<AlignmentError<Src, Dst>>
 }
 
 /// The error emitted if the conversion source is of incorrect size.
-#[derive(PartialEq, Eq)]
 pub struct SizeError<Src, Dst: ?Sized> {
     /// The source value involved in the conversion.
     src: Src,
-    /// The inner destination type inolved in the conversion.
-    dst: SendSyncPhantomData<Dst>,
+    /// The inner destination type involved in the conversion.
+    _dst: SendSyncPhantomData<Dst>,
 }
 
 impl<Src, Dst: ?Sized> SizeError<Src, Dst> {
     pub(crate) fn new(src: Src) -> Self {
-        Self { src, dst: SendSyncPhantomData::default() }
+        Self { src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Produces the source underlying the failed conversion.
@@ -430,7 +448,7 @@ impl<Src, Dst: ?Sized> SizeError<Src, Dst> {
 
     /// Sets the source value associated with the conversion error.
     pub(crate) fn with_src<NewSrc>(self, new_src: NewSrc) -> SizeError<NewSrc, Dst> {
-        SizeError { src: new_src, dst: SendSyncPhantomData::default() }
+        SizeError { src: new_src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Maps the source value associated with the conversion error.
@@ -456,12 +474,12 @@ impl<Src, Dst: ?Sized> SizeError<Src, Dst> {
     /// ```
     #[inline]
     pub fn map_src<NewSrc>(self, f: impl FnOnce(Src) -> NewSrc) -> SizeError<NewSrc, Dst> {
-        SizeError { src: f(self.src), dst: SendSyncPhantomData::default() }
+        SizeError { src: f(self.src), _dst: SendSyncPhantomData::default() }
     }
 
     /// Sets the destination type associated with the conversion error.
     pub(crate) fn with_dst<NewDst: ?Sized>(self) -> SizeError<Src, NewDst> {
-        SizeError { src: self.src, dst: SendSyncPhantomData::default() }
+        SizeError { src: self.src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Converts the error into a general [`ConvertError`].
@@ -508,6 +526,22 @@ impl<Src, Dst: ?Sized> SizeError<Src, Dst> {
     }
 }
 
+impl<Src: Clone, Dst: ?Sized> Clone for SizeError<Src, Dst> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self { src: self.src.clone(), _dst: SendSyncPhantomData::default() }
+    }
+}
+
+impl<Src: PartialEq, Dst: ?Sized> PartialEq for SizeError<Src, Dst> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.src == other.src
+    }
+}
+
+impl<Src: Eq, Dst: ?Sized> Eq for SizeError<Src, Dst> {}
+
 impl<Src, Dst: ?Sized> fmt::Debug for SizeError<Src, Dst> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -536,7 +570,7 @@ where
     }
 }
 
-#[cfg(any(zerocopy_core_error_1_81_0, feature = "std", test))]
+#[cfg(any(not(no_zerocopy_core_error_1_81_0), feature = "std", test))]
 #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.81.0", feature = "std"))))]
 impl<Src, Dst: ?Sized> Error for SizeError<Src, Dst>
 where
@@ -553,17 +587,16 @@ impl<Src, Dst: ?Sized, A, V> From<SizeError<Src, Dst>> for ConvertError<A, SizeE
 }
 
 /// The error emitted if the conversion source contains invalid data.
-#[derive(PartialEq, Eq)]
 pub struct ValidityError<Src, Dst: ?Sized + TryFromBytes> {
     /// The source value involved in the conversion.
     pub(crate) src: Src,
-    /// The inner destination type inolved in the conversion.
-    dst: SendSyncPhantomData<Dst>,
+    /// The inner destination type involved in the conversion.
+    _dst: SendSyncPhantomData<Dst>,
 }
 
 impl<Src, Dst: ?Sized + TryFromBytes> ValidityError<Src, Dst> {
     pub(crate) fn new(src: Src) -> Self {
-        Self { src, dst: SendSyncPhantomData::default() }
+        Self { src, _dst: SendSyncPhantomData::default() }
     }
 
     /// Produces the source underlying the failed conversion.
@@ -594,7 +627,7 @@ impl<Src, Dst: ?Sized + TryFromBytes> ValidityError<Src, Dst> {
     /// ```
     #[inline]
     pub fn map_src<NewSrc>(self, f: impl FnOnce(Src) -> NewSrc) -> ValidityError<NewSrc, Dst> {
-        ValidityError { src: f(self.src), dst: SendSyncPhantomData::default() }
+        ValidityError { src: f(self.src), _dst: SendSyncPhantomData::default() }
     }
 
     /// Converts the error into a general [`ConvertError`].
@@ -607,7 +640,6 @@ impl<Src, Dst: ?Sized + TryFromBytes> ValidityError<Src, Dst> {
     /// This formatting may include potentially sensitive information.
     fn display_verbose_extras(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result
     where
-        Src: Deref,
         Dst: KnownLayout,
     {
         f.write_str("Destination type: ")?;
@@ -615,6 +647,37 @@ impl<Src, Dst: ?Sized + TryFromBytes> ValidityError<Src, Dst> {
         Ok(())
     }
 }
+
+impl<Src: Clone, Dst: ?Sized + TryFromBytes> Clone for ValidityError<Src, Dst> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self { src: self.src.clone(), _dst: SendSyncPhantomData::default() }
+    }
+}
+
+// SAFETY: `ValidityError` contains a single `Self::Inner = Src`, and no other
+// non-ZST fields. `map` passes ownership of `self`'s sole `Self::Inner` to `f`.
+unsafe impl<Src, NewSrc, Dst> crate::pointer::TryWithError<NewSrc>
+    for crate::ValidityError<Src, Dst>
+where
+    Dst: TryFromBytes + ?Sized,
+{
+    type Inner = Src;
+    type Mapped = crate::ValidityError<NewSrc, Dst>;
+    #[inline]
+    fn map<F: FnOnce(Src) -> NewSrc>(self, f: F) -> Self::Mapped {
+        self.map_src(f)
+    }
+}
+
+impl<Src: PartialEq, Dst: ?Sized + TryFromBytes> PartialEq for ValidityError<Src, Dst> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.src == other.src
+    }
+}
+
+impl<Src: Eq, Dst: ?Sized + TryFromBytes> Eq for ValidityError<Src, Dst> {}
 
 impl<Src, Dst: ?Sized + TryFromBytes> fmt::Debug for ValidityError<Src, Dst> {
     #[inline]
@@ -630,7 +693,6 @@ impl<Src, Dst: ?Sized + TryFromBytes> fmt::Debug for ValidityError<Src, Dst> {
 /// potentially sensitive information.
 impl<Src, Dst: ?Sized> fmt::Display for ValidityError<Src, Dst>
 where
-    Src: Deref,
     Dst: KnownLayout + TryFromBytes,
 {
     #[inline]
@@ -644,14 +706,9 @@ where
     }
 }
 
-#[cfg(any(zerocopy_core_error_1_81_0, feature = "std", test))]
+#[cfg(any(not(no_zerocopy_core_error_1_81_0), feature = "std", test))]
 #[cfg_attr(doc_cfg, doc(cfg(all(rust = "1.81.0", feature = "std"))))]
-impl<Src, Dst: ?Sized> Error for ValidityError<Src, Dst>
-where
-    Src: Deref,
-    Dst: KnownLayout + TryFromBytes,
-{
-}
+impl<Src, Dst: ?Sized> Error for ValidityError<Src, Dst> where Dst: KnownLayout + TryFromBytes {}
 
 impl<Src, Dst: ?Sized + TryFromBytes, A, S> From<ValidityError<Src, Dst>>
     for ConvertError<A, S, ValidityError<Src, Dst>>
@@ -735,6 +792,23 @@ impl<Src, Dst: ?Sized> CastError<Src, Dst> {
     }
 }
 
+// SAFETY: `CastError` is either a single `AlignmentError` or a single
+// `SizeError`. In either case, it contains a single `Self::Inner = Src`, and no
+// other non-ZST fields. `map` passes ownership of `self`'s sole `Self::Inner`
+// to `f`.
+unsafe impl<Src, NewSrc, Dst> crate::pointer::TryWithError<NewSrc> for crate::CastError<Src, Dst>
+where
+    Dst: ?Sized,
+{
+    type Inner = Src;
+    type Mapped = crate::CastError<NewSrc, Dst>;
+
+    #[inline]
+    fn map<F: FnOnce(Src) -> NewSrc>(self, f: F) -> Self::Mapped {
+        self.map_src(f)
+    }
+}
+
 impl<Src, Dst: ?Sized + Unaligned> From<CastError<Src, Dst>> for SizeError<Src, Dst> {
     /// Infallibly extracts the [`SizeError`] from this `CastError` since `Dst`
     /// is unaligned.
@@ -797,9 +871,9 @@ impl<Src, Dst: ?Sized + Unaligned> From<CastError<Src, Dst>> for SizeError<Src, 
 pub type TryCastError<Src, Dst: ?Sized + TryFromBytes> =
     ConvertError<AlignmentError<Src, Dst>, SizeError<Src, Dst>, ValidityError<Src, Dst>>;
 
-// TODO(#1139): Remove the `TryFromBytes` here and in other downstream locations
-// (all the way to `ValidityError`) if we determine it's not necessary for rich
-// validity errors.
+// FIXME(#1139): Remove the `TryFromBytes` here and in other downstream
+// locations (all the way to `ValidityError`) if we determine it's not necessary
+// for rich validity errors.
 impl<Src, Dst: ?Sized + TryFromBytes> TryCastError<Src, Dst> {
     /// Produces the source underlying the failed conversion.
     #[inline]
@@ -857,8 +931,9 @@ impl<Src, Dst: ?Sized + TryFromBytes> From<CastError<Src, Dst>> for TryCastError
 
 /// The error type of fallible read-conversions.
 ///
-/// Fallible read-conversions, like [`TryFromBytes::try_read_from_bytes`] may emit
-/// [size](SizeError) and [validity](ValidityError) errors, but not alignment errors.
+/// Fallible read-conversions, like [`TryFromBytes::try_read_from_bytes`] may
+/// emit [size](SizeError) and [validity](ValidityError) errors, but not
+/// alignment errors.
 // Bounds on generic parameters are not enforced in type aliases, but they do
 // appear in rustdoc.
 #[allow(type_alias_bounds)]
@@ -962,6 +1037,8 @@ pub struct AllocError;
 
 #[cfg(test)]
 mod tests {
+    use core::convert::Infallible;
+
     use super::*;
 
     #[test]
@@ -998,6 +1075,48 @@ mod tests {
             >,
         ) {
             is_send_sync(err)
+        }
+    }
+
+    #[test]
+    fn test_eq_partial_eq_clone() {
+        // Test that all error types implement `Eq`, `PartialEq`
+        // and `Clone` if src does
+        // even if `Dst: !Eq`, `!PartialEq`, `!Clone`.
+
+        #[allow(dead_code)]
+        fn is_eq_partial_eq_clone<T: Eq + PartialEq + Clone>(_t: T) {}
+
+        #[allow(dead_code)]
+        fn alignment_err_is_eq_partial_eq_clone<Src: Eq + PartialEq + Clone, Dst>(
+            err: AlignmentError<Src, Dst>,
+        ) {
+            is_eq_partial_eq_clone(err)
+        }
+
+        #[allow(dead_code)]
+        fn size_err_is_eq_partial_eq_clone<Src: Eq + PartialEq + Clone, Dst>(
+            err: SizeError<Src, Dst>,
+        ) {
+            is_eq_partial_eq_clone(err)
+        }
+
+        #[allow(dead_code)]
+        fn validity_err_is_eq_partial_eq_clone<Src: Eq + PartialEq + Clone, Dst: TryFromBytes>(
+            err: ValidityError<Src, Dst>,
+        ) {
+            is_eq_partial_eq_clone(err)
+        }
+
+        #[allow(dead_code)]
+        fn convert_error_is_eq_partial_eq_clone<Src: Eq + PartialEq + Clone, Dst: TryFromBytes>(
+            err: ConvertError<
+                AlignmentError<Src, Dst>,
+                SizeError<Src, Dst>,
+                ValidityError<Src, Dst>,
+            >,
+        ) {
+            is_eq_partial_eq_clone(err)
         }
     }
 
@@ -1085,5 +1204,147 @@ mod tests {
             \n\
             Destination type: bool"
         );
+    }
+
+    #[test]
+    fn test_convert_error_debug() {
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Alignment(AlignmentError::new_checked(&[0u8]));
+        assert_eq!(format!("{:?}", err), "Alignment(AlignmentError)");
+
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Size(SizeError::new(&[0u8]));
+        assert_eq!(format!("{:?}", err), "Size(SizeError)");
+
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Validity(ValidityError::new(&[0u8]));
+        assert_eq!(format!("{:?}", err), "Validity(ValidityError)");
+    }
+
+    #[test]
+    fn test_convert_error_from_unaligned() {
+        // u8 is Unaligned
+        let err: ConvertError<
+            AlignmentError<&[u8], u8>,
+            SizeError<&[u8], u8>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Size(SizeError::new(&[0u8]));
+        let converted: ConvertError<Infallible, SizeError<&[u8], u8>, ValidityError<&[u8], bool>> =
+            ConvertError::from(err);
+        match converted {
+            ConvertError::Size(_) => {}
+            _ => panic!("Expected Size error"),
+        }
+    }
+
+    #[test]
+    fn test_alignment_error_display_debug() {
+        let err: AlignmentError<&[u8], u16> = AlignmentError::new_checked(&[0u8]);
+        assert!(format!("{:?}", err).contains("AlignmentError"));
+        assert!(format!("{}", err).contains("address of the source is not a multiple"));
+    }
+
+    #[test]
+    fn test_size_error_display_debug() {
+        let err: SizeError<&[u8], u16> = SizeError::new(&[0u8]);
+        assert!(format!("{:?}", err).contains("SizeError"));
+        assert!(format!("{}", err).contains("source was incorrectly sized"));
+    }
+
+    #[test]
+    fn test_validity_error_display_debug() {
+        let err: ValidityError<&[u8], bool> = ValidityError::new(&[0u8]);
+        assert!(format!("{:?}", err).contains("ValidityError"));
+        assert!(format!("{}", err).contains("source bytes are not a valid value"));
+    }
+
+    #[test]
+    fn test_convert_error_display_debug_more() {
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Alignment(AlignmentError::new_checked(&[0u8]));
+        assert!(format!("{}", err).contains("address of the source is not a multiple"));
+
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Size(SizeError::new(&[0u8]));
+        assert!(format!("{}", err).contains("source was incorrectly sized"));
+
+        let err: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Validity(ValidityError::new(&[0u8]));
+        assert!(format!("{}", err).contains("source bytes are not a valid value"));
+    }
+
+    #[test]
+    fn test_alignment_error_methods() {
+        let err: AlignmentError<&[u8], u16> = AlignmentError::new_checked(&[0u8]);
+
+        // into_src
+        let src = err.clone().into_src();
+        assert_eq!(src, &[0u8]);
+
+        // into
+        let converted: ConvertError<
+            AlignmentError<&[u8], u16>,
+            SizeError<&[u8], u16>,
+            ValidityError<&[u8], bool>,
+        > = err.clone().into();
+        match converted {
+            ConvertError::Alignment(_) => {}
+            _ => panic!("Expected Alignment error"),
+        }
+
+        // clone
+        let cloned = err.clone();
+        assert_eq!(err, cloned);
+
+        // eq
+        assert_eq!(err, cloned);
+        let err2: AlignmentError<&[u8], u16> = AlignmentError::new_checked(&[1u8]);
+        assert_ne!(err, err2);
+    }
+
+    #[test]
+    fn test_convert_error_from_unaligned_variants() {
+        // u8 is Unaligned
+        let err: ConvertError<
+            AlignmentError<&[u8], u8>,
+            SizeError<&[u8], u8>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Validity(ValidityError::new(&[0u8]));
+        let converted: ConvertError<Infallible, SizeError<&[u8], u8>, ValidityError<&[u8], bool>> =
+            ConvertError::from(err);
+        match converted {
+            ConvertError::Validity(_) => {}
+            _ => panic!("Expected Validity error"),
+        }
+
+        let err: ConvertError<
+            AlignmentError<&[u8], u8>,
+            SizeError<&[u8], u8>,
+            ValidityError<&[u8], bool>,
+        > = ConvertError::Size(SizeError::new(&[0u8]));
+        let converted: ConvertError<Infallible, SizeError<&[u8], u8>, ValidityError<&[u8], bool>> =
+            ConvertError::from(err);
+        match converted {
+            ConvertError::Size(_) => {}
+            _ => panic!("Expected Size error"),
+        }
     }
 }

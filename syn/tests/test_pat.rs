@@ -5,7 +5,9 @@
 )]
 
 #[macro_use]
-mod macros;
+mod snapshot;
+
+mod debug;
 
 use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
 use quote::{quote, ToTokens as _};
@@ -112,27 +114,27 @@ fn test_tuple_comma() {
 
     expr.elems.push_value(parse_quote!(_));
     // Must not parse to Pat::Paren
-    snapshot!(expr.to_token_stream() as Pat, @r#"
+    snapshot!(expr.to_token_stream() as Pat, @"
     Pat::Tuple {
         elems: [
             Pat::Wild,
             Token![,],
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_punct(<Token![,]>::default());
-    snapshot!(expr.to_token_stream() as Pat, @r#"
+    snapshot!(expr.to_token_stream() as Pat, @"
     Pat::Tuple {
         elems: [
             Pat::Wild,
             Token![,],
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_value(parse_quote!(_));
-    snapshot!(expr.to_token_stream() as Pat, @r#"
+    snapshot!(expr.to_token_stream() as Pat, @"
     Pat::Tuple {
         elems: [
             Pat::Wild,
@@ -140,10 +142,10 @@ fn test_tuple_comma() {
             Pat::Wild,
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_punct(<Token![,]>::default());
-    snapshot!(expr.to_token_stream() as Pat, @r#"
+    snapshot!(expr.to_token_stream() as Pat, @"
     Pat::Tuple {
         elems: [
             Pat::Wild,
@@ -152,5 +154,5 @@ fn test_tuple_comma() {
             Token![,],
         ],
     }
-    "#);
+    ");
 }

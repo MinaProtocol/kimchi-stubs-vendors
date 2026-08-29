@@ -20,9 +20,9 @@ pub enum BytesReadError {
 impl Display for BytesReadError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match *self {
-            BytesReadError::InsufficientBytes { expected, actual, position } => {
+            Self::InsufficientBytes { expected, actual, position } => {
                 write!(f, "Expected at least bytes {expected}, but only got {actual} (pos {position})")
-            }
+            },
         }
     }
 }
@@ -58,22 +58,24 @@ impl<'a> Bytes<'a> {
     /// This sets the internal position to zero.
     #[inline]
     #[must_use]
-    pub fn new(bytes: &'a [u8]) -> Self {
+    pub const fn new(bytes: &'a [u8]) -> Self {
         Bytes { bytes, current_position: 0 }
     }
+
     /// Get a reference to the remaining bytes in the buffer.
     #[inline]
     #[must_use]
-    pub fn remaining_slice(&self) -> &'a [u8] {
+    pub const fn remaining_slice(&self) -> &'a [u8] {
         self.bytes
     }
+
     /// Return the position of the input buffer.
     ///
     /// This is not required for correctness, it only exists to help mimic
     /// [`Cursor::position`](std::io::Cursor::position)
     #[inline]
     #[must_use]
-    pub fn position(&self) -> u64 {
+    pub const fn position(&self) -> u64 {
         self.current_position
     }
 }

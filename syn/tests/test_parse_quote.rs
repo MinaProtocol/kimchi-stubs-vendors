@@ -5,7 +5,9 @@
 )]
 
 #[macro_use]
-mod macros;
+mod snapshot;
+
+mod debug;
 
 use syn::punctuated::Punctuated;
 use syn::{parse_quote, Attribute, Field, Lit, Pat, Stmt, Token};
@@ -47,6 +49,7 @@ fn test_field() {
     snapshot!(field, @r#"
     Field {
         vis: Visibility::Public,
+        modifiers: FieldModifiers,
         ident: Some("enabled"),
         colon_token: Some,
         ty: Type::Path {
@@ -65,6 +68,7 @@ fn test_field() {
     snapshot!(field, @r#"
     Field {
         vis: Visibility::Inherited,
+        modifiers: FieldModifiers,
         ty: Type::Path {
             path: Path {
                 segments: [
@@ -152,9 +156,10 @@ fn test_vec_stmt() {
         let _;
         true
     };
-    snapshot!(stmts, @r#"
+    snapshot!(stmts, @"
     [
         Stmt::Local {
+            modifiers: LocalModifiers,
             pat: Pat::Wild,
         },
         Stmt::Expr(
@@ -166,5 +171,5 @@ fn test_vec_stmt() {
             None,
         ),
     ]
-    "#);
+    ");
 }

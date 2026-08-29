@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0 OR MIT
+//
 // Copyright 2024 The Fuchsia Authors
 //
 // Licensed under the 2-Clause BSD License <LICENSE-BSD or
@@ -26,10 +28,16 @@ const POINTER_WIDTH_BITS: usize = mem::size_of::<usize>() * 8;
 /// the layout of real Rust types or instances of types.
 #[doc(hidden)]
 #[allow(missing_debug_implementations, missing_copy_implementations)]
-#[cfg_attr(any(kani, test), derive(Copy, Clone, Debug, PartialEq, Eq))]
+#[cfg_attr(any(kani, test), derive(Debug, PartialEq, Eq))]
+#[derive(Copy, Clone)]
 pub struct DstLayout {
     pub(crate) align: NonZeroUsize,
     pub(crate) size_info: SizeInfo,
+    // Is it guaranteed statically (without knowing a value's runtime metadata)
+    // that the top-level type contains no padding? This does *not* apply
+    // recursively - for example, `[(u8, u16)]` has `statically_shallow_unpadded
+    // = true` even though this type likely has padding inside each `(u8, u16)`.
+    pub(crate) statically_shallow_unpadded: bool,
 }
 
 #[cfg_attr(any(kani, test), derive(Debug, PartialEq, Eq))]
@@ -63,6 +71,8 @@ impl SizeInfo {
     /// Attempts to create a `SizeInfo` from `Self` in which `elem_size` is a
     /// `NonZeroUsize`. If `elem_size` is 0, returns `None`.
     #[allow(unused)]
+    #[cfg_attr(not(zerocopy_inline_always), inline)]
+    #[cfg_attr(zerocopy_inline_always, inline(always))]
     const fn try_to_nonzero_elem_size(&self) -> Option<SizeInfo<NonZeroUsize>> {
         Some(match *self {
             SizeInfo::Sized { size } => SizeInfo::Sized { size },
@@ -130,6 +140,34 @@ impl DstLayout {
         None => const_unreachable!(),
     };
 
+    /// The maximum size of an allocation \[1\].
+    ///
+    /// \[1\] Per <https://doc.rust-lang.org/1.91.1/std/ptr/index.html#allocation>:
+    ///
+    ///   For any allocation with base `address`, `size`, and a set of `addresses`,
+    ///   the following are guaranteed: [..]
+    ///
+    ///   - `size <= isize::MAX`
+    ///
+    #[allow(clippy::as_conversions)]
+    pub(crate) const MAX_SIZE: usize = isize::MAX as usize;
+
+    /// Assumes that this layout lacks static shallow padding.
+    ///
+    /// # Panics
+    ///
+    /// This method does not panic.
+    ///
+    /// # Safety
+    ///
+    /// If `self` describes the size and alignment of type that lacks static
+    /// shallow padding, unsafe code may assume that the result of this method
+    /// accurately reflects the size, alignment, and lack of static shallow
+    /// padding of that type.
+    const fn assume_shallow_unpadded(self) -> Self {
+        Self { statically_shallow_unpadded: true, ..self }
+    }
+
     /// Constructs a `DstLayout` for a zero-sized type with `repr_align`
     /// alignment (or 1). If `repr_align` is provided, then it must be a power
     /// of two.
@@ -152,10 +190,15 @@ impl DstLayout {
 
         const_assert!(align.get().is_power_of_two());
 
-        DstLayout { align, size_info: SizeInfo::Sized { size: 0 } }
+        DstLayout {
+            align,
+            size_info: SizeInfo::Sized { size: 0 },
+            statically_shallow_unpadded: true,
+        }
     }
 
-    /// Constructs a `DstLayout` which describes `T`.
+    /// Constructs a `DstLayout` which describes `T` and assumes `T` may contain
+    /// padding.
     ///
     /// # Safety
     ///
@@ -166,14 +209,29 @@ impl DstLayout {
     pub const fn for_type<T>() -> DstLayout {
         // SAFETY: `align` is correct by construction. `T: Sized`, and so it is
         // sound to initialize `size_info` to `SizeInfo::Sized { size }`; the
-        // `size` field is also correct by construction.
+        // `size` field is also correct by construction. `unpadded` can safely
+        // default to `false`.
         DstLayout {
             align: match NonZeroUsize::new(mem::align_of::<T>()) {
                 Some(align) => align,
                 None => const_unreachable!(),
             },
             size_info: SizeInfo::Sized { size: mem::size_of::<T>() },
+            statically_shallow_unpadded: false,
         }
+    }
+
+    /// Constructs a `DstLayout` which describes a `T` that does not contain
+    /// padding.
+    ///
+    /// # Safety
+    ///
+    /// Unsafe code may assume that `DstLayout` is the correct layout for `T`.
+    #[doc(hidden)]
+    #[must_use]
+    #[inline]
+    pub const fn for_unpadded_type<T>() -> DstLayout {
+        Self::for_type::<T>().assume_shallow_unpadded()
     }
 
     /// Constructs a `DstLayout` which describes `[T]`.
@@ -199,7 +257,57 @@ impl DstLayout {
                 offset: 0,
                 elem_size: mem::size_of::<T>(),
             }),
+            statically_shallow_unpadded: true,
         }
+    }
+
+    /// Constructs a complete `DstLayout` reflecting a `repr(C)` struct with the
+    /// given alignment modifiers and fields.
+    ///
+    /// This method cannot be used to match the layout of a record with the
+    /// default representation, as that representation is mostly unspecified.
+    ///
+    /// # Safety
+    ///
+    /// For any definition of a `repr(C)` struct, if this method is invoked with
+    /// alignment modifiers and fields corresponding to that definition, the
+    /// resulting `DstLayout` will correctly encode the layout of that struct.
+    ///
+    /// We make no guarantees to the behavior of this method when it is invoked
+    /// with arguments that cannot correspond to a valid `repr(C)` struct.
+    #[must_use]
+    #[inline]
+    pub const fn for_repr_c_struct(
+        repr_align: Option<NonZeroUsize>,
+        repr_packed: Option<NonZeroUsize>,
+        fields: &[DstLayout],
+    ) -> DstLayout {
+        let mut layout = DstLayout::new_zst(repr_align);
+
+        let mut i = 0;
+        #[allow(clippy::arithmetic_side_effects)]
+        while i < fields.len() {
+            #[allow(clippy::indexing_slicing)]
+            let field = fields[i];
+            layout = layout.extend(field, repr_packed);
+            i += 1;
+        }
+
+        layout = layout.pad_to_align();
+
+        // SAFETY: `layout` accurately describes the layout of a `repr(C)`
+        // struct with `repr_align` or `repr_packed` alignment modifications and
+        // the given `fields`. The `layout` is constructed using a sequence of
+        // invocations of `DstLayout::{new_zst,extend,pad_to_align}`. The
+        // documentation of these items vows that invocations in this manner
+        // will accurately describe a type, so long as:
+        //
+        //  - that type is `repr(C)`,
+        //  - its fields are enumerated in the order they appear,
+        //  - the presence of `repr_align` and `repr_packed` are correctly accounted for.
+        //
+        // We respect all three of these preconditions above.
+        layout
     }
 
     /// Like `Layout::extend`, this creates a layout that describes a record
@@ -268,7 +376,7 @@ impl DstLayout {
         // `field_align`.
         let align = max(self.align, field_align);
 
-        let size_info = match self.size_info {
+        let (interfield_padding, size_info) = match self.size_info {
             // If the layout is already a DST, we panic; DSTs cannot be extended
             // with additional fields.
             SizeInfo::SliceDst(..) => const_panic!("Cannot extend a DST with additional fields."),
@@ -295,58 +403,69 @@ impl DstLayout {
                     None => const_panic!("Adding padding to `self`'s size overflows `usize`."),
                 };
 
-                match field.size_info {
-                    SizeInfo::Sized { size: field_size } => {
-                        // If the trailing field is sized, the resulting layout
-                        // will be sized. Its size will be the sum of the
-                        // preceeding layout, the size of the new field, and the
-                        // size of inter-field padding between the two.
-                        //
-                        // This will not panic (and is proven with Kani to not
-                        // panic) if the layout components can correspond to a
-                        // leading layout fragment of a valid Rust type, but may
-                        // panic otherwise (e.g., combining or aligning the
-                        // components would create a size exceeding
-                        // `usize::MAX`).
-                        let size = match offset.checked_add(field_size) {
-                            Some(size) => size,
-                            None => const_panic!("`field` cannot be appended without the total size overflowing `usize`"),
-                        };
-                        SizeInfo::Sized { size }
-                    }
-                    SizeInfo::SliceDst(TrailingSliceLayout {
-                        offset: trailing_offset,
-                        elem_size,
-                    }) => {
-                        // If the trailing field is dynamically sized, so too
-                        // will the resulting layout. The offset of the trailing
-                        // slice component is the sum of the offset of the
-                        // trailing field and the trailing slice offset within
-                        // that field.
-                        //
-                        // This will not panic (and is proven with Kani to not
-                        // panic) if the layout components can correspond to a
-                        // leading layout fragment of a valid Rust type, but may
-                        // panic otherwise (e.g., combining or aligning the
-                        // components would create a size exceeding
-                        // `usize::MAX`).
-                        let offset = match offset.checked_add(trailing_offset) {
-                            Some(offset) => offset,
-                            None => const_panic!("`field` cannot be appended without the total size overflowing `usize`"),
-                        };
-                        SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size })
-                    }
-                }
+                (
+                    padding,
+                    match field.size_info {
+                        SizeInfo::Sized { size: field_size } => {
+                            // If the trailing field is sized, the resulting layout
+                            // will be sized. Its size will be the sum of the
+                            // preceding layout, the size of the new field, and the
+                            // size of inter-field padding between the two.
+                            //
+                            // This will not panic (and is proven with Kani to not
+                            // panic) if the layout components can correspond to a
+                            // leading layout fragment of a valid Rust type, but may
+                            // panic otherwise (e.g., combining or aligning the
+                            // components would create a size exceeding
+                            // `usize::MAX`).
+                            let size = match offset.checked_add(field_size) {
+                                Some(size) => size,
+                                None => const_panic!("`field` cannot be appended without the total size overflowing `usize`"),
+                            };
+                            SizeInfo::Sized { size }
+                        }
+                        SizeInfo::SliceDst(TrailingSliceLayout {
+                            offset: trailing_offset,
+                            elem_size,
+                        }) => {
+                            // If the trailing field is dynamically sized, so too
+                            // will the resulting layout. The offset of the trailing
+                            // slice component is the sum of the offset of the
+                            // trailing field and the trailing slice offset within
+                            // that field.
+                            //
+                            // This will not panic (and is proven with Kani to not
+                            // panic) if the layout components can correspond to a
+                            // leading layout fragment of a valid Rust type, but may
+                            // panic otherwise (e.g., combining or aligning the
+                            // components would create a size exceeding
+                            // `usize::MAX`).
+                            let offset = match offset.checked_add(trailing_offset) {
+                                Some(offset) => offset,
+                                None => const_panic!("`field` cannot be appended without the total size overflowing `usize`"),
+                            };
+                            SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size })
+                        }
+                    },
+                )
             }
         };
 
-        DstLayout { align, size_info }
+        let statically_shallow_unpadded = self.statically_shallow_unpadded
+            && field.statically_shallow_unpadded
+            && interfield_padding == 0;
+
+        DstLayout { align, size_info, statically_shallow_unpadded }
     }
 
     /// Like `Layout::pad_to_align`, this routine rounds the size of this layout
     /// up to the nearest multiple of this type's alignment or `repr_packed`
     /// (whichever is less). This method leaves DST layouts unchanged, since the
     /// trailing padding of DSTs is computed at runtime.
+    ///
+    /// The accompanying boolean is `true` if the resulting composition of
+    /// fields necessitated static (as opposed to dynamic) padding; otherwise
+    /// `false`.
     ///
     /// In order to match the layout of a `#[repr(C)]` struct, this method
     /// should be invoked after the invocations of [`DstLayout::extend`]. If
@@ -373,7 +492,7 @@ impl DstLayout {
     pub const fn pad_to_align(self) -> Self {
         use util::padding_needed_for;
 
-        let size_info = match self.size_info {
+        let (static_padding, size_info) = match self.size_info {
             // For sized layouts, we add the minimum amount of trailing padding
             // needed to satisfy alignment.
             SizeInfo::Sized { size: unpadded_size } => {
@@ -382,16 +501,43 @@ impl DstLayout {
                     Some(size) => size,
                     None => const_panic!("Adding padding caused size to overflow `usize`."),
                 };
-                SizeInfo::Sized { size }
+                (padding, SizeInfo::Sized { size })
             }
             // For DST layouts, trailing padding depends on the length of the
             // trailing DST and is computed at runtime. This does not alter the
             // offset or element size of the layout, so we leave `size_info`
             // unchanged.
-            size_info @ SizeInfo::SliceDst(_) => size_info,
+            size_info @ SizeInfo::SliceDst(_) => (0, size_info),
         };
 
-        DstLayout { align: self.align, size_info }
+        let statically_shallow_unpadded = self.statically_shallow_unpadded && static_padding == 0;
+
+        DstLayout { align: self.align, size_info, statically_shallow_unpadded }
+    }
+
+    /// Produces `true` if `self` requires static padding; otherwise `false`.
+    #[must_use]
+    #[inline(always)]
+    pub const fn requires_static_padding(self) -> bool {
+        !self.statically_shallow_unpadded
+    }
+
+    /// Produces `true` if there exists any metadata for which a type of layout
+    /// `self` would require dynamic trailing padding; otherwise `false`.
+    #[must_use]
+    #[inline(always)]
+    pub const fn requires_dynamic_padding(self) -> bool {
+        // A `% self.align.get()` cannot panic, since `align` is non-zero.
+        #[allow(clippy::arithmetic_side_effects)]
+        match self.size_info {
+            SizeInfo::Sized { .. } => false,
+            SizeInfo::SliceDst(trailing_slice_layout) => {
+                // SAFETY: This predicate is formally proved sound by
+                // `proofs::prove_requires_dynamic_padding`.
+                trailing_slice_layout.offset % self.align.get() != 0
+                    || trailing_slice_layout.elem_size % self.align.get() != 0
+            }
+        }
     }
 
     /// Validates that a cast is sound from a layout perspective.
@@ -484,7 +630,7 @@ impl DstLayout {
         // would have failed anyway for runtime reasons (such as a too-small
         // memory region).
         //
-        // TODO(#67): Once our MSRV is 1.65, use let-else:
+        // FIXME(#67): Once our MSRV is 1.65, use let-else:
         // https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html#let-else-statements
         let size_info = match self.size_info.try_to_nonzero_elem_size() {
             Some(size_info) => size_info,
@@ -544,7 +690,7 @@ impl DstLayout {
                 // Calculate the maximum number of bytes that could be consumed
                 // by the trailing slice.
                 //
-                // TODO(#67): Once our MSRV is 1.65, use let-else:
+                // FIXME(#67): Once our MSRV is 1.65, use let-else:
                 // https://blog.rust-lang.org/2022/11/03/Rust-1.65.0.html#let-else-statements
                 let max_slice_and_padding_bytes = match max_total_bytes.checked_sub(offset) {
                     Some(max) => max,
@@ -608,7 +754,348 @@ impl DstLayout {
     }
 }
 
-// TODO(#67): For some reason, on our MSRV toolchain, this `allow` isn't
+pub(crate) use cast_from::CastFrom;
+mod cast_from {
+    use crate::*;
+
+    pub(crate) struct CastFrom<Dst: ?Sized> {
+        _never: core::convert::Infallible,
+        _marker: PhantomData<Dst>,
+    }
+
+    // SAFETY: The implementation of `Project::project` preserves the address
+    // of the referent – it only modifies pointer metadata.
+    unsafe impl<Src, Dst> crate::pointer::cast::Cast<Src, Dst> for CastFrom<Dst>
+    where
+        Src: KnownLayout + ?Sized,
+        Dst: KnownLayout + ?Sized,
+    {
+    }
+
+    // SAFETY: The implementation of `Project::project` preserves the size of
+    // the referent (see inline comments for a more detailed proof of this).
+    unsafe impl<Src, Dst> crate::pointer::cast::CastExact<Src, Dst> for CastFrom<Dst>
+    where
+        Src: KnownLayout + ?Sized,
+        Dst: KnownLayout + ?Sized,
+    {
+    }
+
+    // SAFETY: `project` produces a pointer which refers to the same referent
+    // bytes as its input, or to a subset of them (see inline comments for a
+    // more detailed proof of this). It does this using provenance-preserving
+    // operations.
+    unsafe impl<Src, Dst> crate::pointer::cast::Project<Src, Dst> for CastFrom<Dst>
+    where
+        Src: KnownLayout + ?Sized,
+        Dst: KnownLayout + ?Sized,
+    {
+        /// # PME
+        ///
+        /// Generates a post-monomorphization error if it is not possible to
+        /// implement soundly.
+        //
+        // FIXME(#1817): Support Sized->Unsized and Unsized->Sized casts
+        fn project(src: PtrInner<'_, Src>) -> *mut Dst {
+            /// The parameters required in order to perform a pointer cast from
+            /// `Src` to `Dst`.
+            ///
+            /// These are a compile-time function of the layouts of `Src`
+            /// and `Dst`.
+            ///
+            /// # Safety
+            ///
+            /// `Src`'s alignment must not be smaller than `Dst`'s alignment.
+            struct CastParams<Src: ?Sized, Dst: ?Sized> {
+                inner: CastParamsInner,
+                _src: PhantomData<Src>,
+                _dst: PhantomData<Dst>,
+            }
+
+            #[derive(Copy, Clone)]
+            enum CastParamsInner {
+                // At compile time (specifically, post-monomorphization time),
+                // we need to compute two things:
+                // - Whether, given *any* `*Src`, it is possible to construct a
+                //   `*Dst` which addresses the same number of bytes (ie,
+                //   whether, for any `Src` pointer metadata, there exists `Dst`
+                //   pointer metadata that addresses the same number of bytes)
+                // - If this is possible, any information necessary to perform
+                //   the `Src`->`Dst` metadata conversion at runtime.
+                //
+                // Assume that `Src` and `Dst` are slice DSTs, and define:
+                // - `S_OFF = Src::LAYOUT.size_info.offset`
+                // - `S_ELEM = Src::LAYOUT.size_info.elem_size`
+                // - `D_OFF = Dst::LAYOUT.size_info.offset`
+                // - `D_ELEM = Dst::LAYOUT.size_info.elem_size`
+                //
+                // We are trying to solve the following equation:
+                //
+                //   D_OFF + d_meta * D_ELEM = S_OFF + s_meta * S_ELEM
+                //
+                // At runtime, we will be attempting to compute `d_meta`, given
+                // `s_meta` (a runtime value) and all other parameters (which
+                // are compile-time values). We can solve like so:
+                //
+                //   D_OFF + d_meta * D_ELEM = S_OFF + s_meta * S_ELEM
+                //
+                //   d_meta * D_ELEM = S_OFF - D_OFF + s_meta * S_ELEM
+                //
+                //   d_meta = (S_OFF - D_OFF + s_meta * S_ELEM)/D_ELEM
+                //
+                // Since `d_meta` will be a `usize`, we need the right-hand side
+                // to be an integer, and this needs to hold for *any* value of
+                // `s_meta` (in order for our conversion to be infallible - ie,
+                // to not have to reject certain values of `s_meta` at runtime).
+                // This means that:
+                //
+                // - `s_meta * S_ELEM` must be a multiple of `D_ELEM`
+                // - Since this must hold for any value of `s_meta`, `S_ELEM`
+                //   must be a multiple of `D_ELEM`
+                // - `S_OFF - D_OFF` must be a multiple of `D_ELEM`
+                //
+                // Thus, let `OFFSET_DELTA_ELEMS = (S_OFF - D_OFF)/D_ELEM` and
+                // `ELEM_MULTIPLE = S_ELEM/D_ELEM`. We can rewrite the above
+                // expression as:
+                //
+                //   d_meta = (S_OFF - D_OFF + s_meta * S_ELEM)/D_ELEM
+                //
+                //   d_meta = OFFSET_DELTA_ELEMS + s_meta * ELEM_MULTIPLE
+                //
+                // Thus, we just need to compute the following and confirm that
+                // they have integer solutions in order to both a) determine
+                // whether infallible `Src` -> `Dst` casts are possible and, b)
+                // pre-compute the parameters necessary to perform those casts
+                // at runtime. These parameters are encapsulated in
+                // `CastParams`, which acts as a witness that such infallible
+                // casts are possible.
+                /// The parameters required in order to perform an
+                /// unsized-to-unsized pointer cast from `Src` to `Dst` as
+                /// described above.
+                ///
+                /// # Safety
+                ///
+                /// `Src` and `Dst` must both be slice DSTs.
+                ///
+                /// `offset_delta_elems` and `elem_multiple` must be valid as
+                /// described above.
+                UnsizedToUnsized { offset_delta_elems: usize, elem_multiple: usize },
+
+                /// The metadata of a `Dst` which has the same size as `Src:
+                /// Sized`.
+                ///
+                /// # Safety
+                ///
+                /// `Src: Sized` and `Dst` must be a slice DST.
+                ///
+                /// A raw `Dst` pointer with metadata `dst_meta` must address
+                /// `size_of::<Src>()` bytes.
+                SizedToUnsized { dst_meta: usize },
+
+                /// The metadata of a `Dst` which has the same size as `Src:
+                /// Sized`.
+                ///
+                /// # Safety
+                ///
+                /// `Src` and `Dst` must both be `Sized` and `size_of::<Src>()
+                /// == size_of::<Dst>()`.
+                SizedToSized,
+            }
+
+            impl<Src: ?Sized, Dst: ?Sized> Copy for CastParams<Src, Dst> {}
+            impl<Src: ?Sized, Dst: ?Sized> Clone for CastParams<Src, Dst> {
+                fn clone(&self) -> Self {
+                    *self
+                }
+            }
+
+            impl<Src: ?Sized, Dst: ?Sized> CastParams<Src, Dst> {
+                const fn try_compute(
+                    src: &DstLayout,
+                    dst: &DstLayout,
+                ) -> Option<CastParams<Src, Dst>> {
+                    if src.align.get() < dst.align.get() {
+                        return None;
+                    }
+
+                    let inner = match (src.size_info, dst.size_info) {
+                        (
+                            SizeInfo::Sized { size: src_size },
+                            SizeInfo::Sized { size: dst_size },
+                        ) => {
+                            if src_size != dst_size {
+                                return None;
+                            }
+
+                            // SAFETY: We checked above that `src_size ==
+                            // dst_size`.
+                            CastParamsInner::SizedToSized
+                        }
+                        (SizeInfo::Sized { size: src_size }, SizeInfo::SliceDst(dst)) => {
+                            let offset_delta = if let Some(od) = src_size.checked_sub(dst.offset) {
+                                od
+                            } else {
+                                return None;
+                            };
+
+                            let dst_elem_size = if let Some(e) = NonZeroUsize::new(dst.elem_size) {
+                                e
+                            } else {
+                                return None;
+                            };
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let delta_mod_other_elem = offset_delta % dst_elem_size.get();
+
+                            if delta_mod_other_elem != 0 {
+                                return None;
+                            }
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let dst_meta = offset_delta / dst_elem_size.get();
+
+                            // SAFETY: The preceding math ensures that a `Dst`
+                            // with `dst_meta` addresses `src_size` bytes.
+                            CastParamsInner::SizedToUnsized { dst_meta }
+                        }
+                        (SizeInfo::SliceDst(src), SizeInfo::SliceDst(dst)) => {
+                            let offset_delta = if let Some(od) = src.offset.checked_sub(dst.offset)
+                            {
+                                od
+                            } else {
+                                return None;
+                            };
+
+                            let dst_elem_size = if let Some(e) = NonZeroUsize::new(dst.elem_size) {
+                                e
+                            } else {
+                                return None;
+                            };
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let delta_mod_other_elem = offset_delta % dst_elem_size.get();
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let elem_remainder = src.elem_size % dst_elem_size.get();
+
+                            if delta_mod_other_elem != 0
+                                || src.elem_size < dst.elem_size
+                                || elem_remainder != 0
+                            {
+                                return None;
+                            }
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let offset_delta_elems = offset_delta / dst_elem_size.get();
+
+                            // PANICS: `dst_elem_size: NonZeroUsize`, so this won't
+                            // divide by zero.
+                            #[allow(clippy::arithmetic_side_effects)]
+                            let elem_multiple = src.elem_size / dst_elem_size.get();
+
+                            CastParamsInner::UnsizedToUnsized {
+                                // SAFETY: We checked above that this is an exact ratio.
+                                offset_delta_elems,
+                                // SAFETY: We checked above that this is an exact ratio.
+                                elem_multiple,
+                            }
+                        }
+                        _ => return None,
+                    };
+
+                    // SAFETY: We checked above that `src.align >= dst.align`.
+                    Some(CastParams { inner, _src: PhantomData, _dst: PhantomData })
+                }
+            }
+
+            impl<Src: KnownLayout + ?Sized, Dst: KnownLayout + ?Sized> CastParams<Src, Dst> {
+                /// # Safety
+                ///
+                /// `src_meta` describes a `Src` whose size is no larger than
+                /// `isize::MAX`.
+                ///
+                /// The returned metadata describes a `Dst` of the same size as
+                /// the original `Src`.
+                #[inline(always)]
+                unsafe fn cast_metadata(
+                    self,
+                    src_meta: Src::PointerMetadata,
+                ) -> Dst::PointerMetadata {
+                    #[allow(unused)]
+                    use crate::util::polyfills::*;
+
+                    let dst_meta = match self.inner {
+                        CastParamsInner::UnsizedToUnsized { offset_delta_elems, elem_multiple } => {
+                            let src_meta = src_meta.to_elem_count();
+                            #[allow(
+                                unstable_name_collisions,
+                                clippy::multiple_unsafe_ops_per_block
+                            )]
+                            // SAFETY: `self` is a witness that the following
+                            // equation holds:
+                            //
+                            //   D_OFF + d_meta * D_ELEM = S_OFF + s_meta * S_ELEM
+                            //
+                            // Since the caller promises that `src_meta` is
+                            // valid `Src` metadata, this math will not
+                            // overflow, and the returned value will describe a
+                            // `Dst` of the same size.
+                            unsafe {
+                                offset_delta_elems
+                                    .unchecked_add(src_meta.unchecked_mul(elem_multiple))
+                            }
+                        }
+                        CastParamsInner::SizedToUnsized { dst_meta } => dst_meta,
+                        CastParamsInner::SizedToSized => 0,
+                    };
+                    Dst::PointerMetadata::from_elem_count(dst_meta)
+                }
+            }
+
+            trait Params<Src: ?Sized> {
+                const CAST_PARAMS: CastParams<Src, Self>;
+            }
+
+            impl<Src, Dst> Params<Src> for Dst
+            where
+                Src: KnownLayout + ?Sized,
+                Dst: KnownLayout + ?Sized,
+            {
+                const CAST_PARAMS: CastParams<Src, Dst> =
+                    match CastParams::try_compute(&Src::LAYOUT, &Dst::LAYOUT) {
+                        Some(params) => params,
+                        None => const_panic!(
+                            "cannot `transmute_ref!` or `transmute_mut!` between incompatible types"
+                        ),
+                    };
+            }
+
+            let src_meta = <Src as KnownLayout>::pointer_to_metadata(src.as_ptr());
+            let params = <Dst as Params<Src>>::CAST_PARAMS;
+
+            // SAFETY: `src: PtrInner` guarantees that `src`'s referent is zero
+            // bytes or lives in a single allocation, which means that it is no
+            // larger than `isize::MAX` bytes [1].
+            //
+            // [1] https://doc.rust-lang.org/1.92.0/std/ptr/index.html#allocation
+            let dst_meta = unsafe { params.cast_metadata(src_meta) };
+
+            <Dst as KnownLayout>::raw_from_ptr_len(src.as_non_null().cast(), dst_meta).as_ptr()
+        }
+    }
+}
+
+// FIXME(#67): For some reason, on our MSRV toolchain, this `allow` isn't
 // enforced despite having `#![allow(unknown_lints)]` at the crate root, but
 // putting it here works. Once our MSRV is high enough that this bug has been
 // fixed, remove this `allow`.
@@ -616,6 +1103,19 @@ impl DstLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dst_layout_for_slice() {
+        let layout = DstLayout::for_slice::<u32>();
+        match layout.size_info {
+            SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size }) => {
+                assert_eq!(offset, 0);
+                assert_eq!(elem_size, 4);
+            }
+            _ => panic!("Expected SliceDst"),
+        }
+        assert_eq!(layout.align.get(), 4);
+    }
 
     /// Tests of when a sized `DstLayout` is extended with a sized field.
     #[allow(clippy::decimal_literal_representation)]
@@ -641,7 +1141,8 @@ mod tests {
                         composite,
                         DstLayout {
                             align: NonZeroUsize::new(align).unwrap(),
-                            size_info: SizeInfo::Sized { size: align }
+                            size_info: SizeInfo::Sized { size: align },
+                            statically_shallow_unpadded: false,
                         }
                     )
                 }
@@ -700,6 +1201,7 @@ mod tests {
                 let trailing_field = DstLayout {
                     align,
                     size_info: SizeInfo::SliceDst(TrailingSliceLayout { elem_size, offset: 11 }),
+                    statically_shallow_unpadded: false,
                 };
 
                 let composite = base.extend(trailing_field, pack);
@@ -716,6 +1218,7 @@ mod tests {
                             elem_size,
                             offset: align + trailing_field_offset,
                         }),
+                        statically_shallow_unpadded: false,
                     }
                 )
             }
@@ -730,11 +1233,19 @@ mod tests {
         // to `align`, call `pad_to_align`, and assert that the size of the
         // resulting layout is equal to `align`.
         for align in (0..29).map(|p| NonZeroUsize::new(2usize.pow(p)).unwrap()) {
-            let layout = DstLayout { align, size_info: SizeInfo::Sized { size: 1 } };
+            let layout = DstLayout {
+                align,
+                size_info: SizeInfo::Sized { size: 1 },
+                statically_shallow_unpadded: true,
+            };
 
             assert_eq!(
                 layout.pad_to_align(),
-                DstLayout { align, size_info: SizeInfo::Sized { size: align.get() } }
+                DstLayout {
+                    align,
+                    size_info: SizeInfo::Sized { size: align.get() },
+                    statically_shallow_unpadded: align.get() == 1
+                }
             );
         }
 
@@ -747,6 +1258,7 @@ mod tests {
                 let unpadded = DstLayout {
                     align: NonZeroUsize::new($unpadded_align).unwrap(),
                     size_info: SizeInfo::Sized { size: $unpadded_size },
+                    statically_shallow_unpadded: false,
                 };
                 let padded = unpadded.pad_to_align();
 
@@ -755,6 +1267,7 @@ mod tests {
                     DstLayout {
                         align: NonZeroUsize::new($padded_align).unwrap(),
                         size_info: SizeInfo::Sized { size: $padded_size },
+                        statically_shallow_unpadded: false,
                     }
                 );
             };
@@ -788,6 +1301,7 @@ mod tests {
                     let layout = DstLayout {
                         align,
                         size_info: SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size }),
+                        statically_shallow_unpadded: false,
                     };
                     assert_eq!(layout.pad_to_align(), layout);
                 }
@@ -816,7 +1330,11 @@ mod tests {
         }
 
         fn layout<S: Into<SizeInfo>>(s: S, align: usize) -> DstLayout {
-            DstLayout { size_info: s.into(), align: NonZeroUsize::new(align).unwrap() }
+            DstLayout {
+                size_info: s.into(),
+                align: NonZeroUsize::new(align).unwrap(),
+                statically_shallow_unpadded: false,
+            }
         }
 
         /// This macro accepts arguments in the form of:
@@ -888,7 +1406,7 @@ mod tests {
                             layout(size_info, align).validate_cast_and_convert_metadata(addr, bytes_len, cast_type)
                         }).map_err(|d| {
                             let msg = d.downcast::<&'static str>().ok().map(|s| *s.as_ref());
-                            assert!(msg.is_some() || cfg!(not(zerocopy_panic_in_const_and_vec_try_reserve_1_57_0)), "non-string panic messages are not permitted when `--cfg zerocopy_panic_in_const_and_vec_try_reserve` is set");
+                            assert!(msg.is_some() || cfg!(no_zerocopy_panic_in_const_and_vec_try_reserve_1_57_0), "non-string panic messages are not permitted when usage of panic in const fn is enabled");
                             msg
                         });
                         std::panic::set_hook(previous_hook);
@@ -1050,7 +1568,7 @@ mod tests {
                 };
 
                 // If a cast is invalid, it is either because...
-                // 1. there are insufficent bytes at the given region for type:
+                // 1. there are insufficient bytes at the given region for type:
                 let insufficient_bytes = bytes_len < min_size;
                 // 2. performing the cast would misalign type:
                 let base = match cast_type {
@@ -1079,11 +1597,12 @@ mod tests {
     #[test]
     #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
     fn test_validate_rust_layout() {
-        use crate::util::testutil::*;
         use core::{
             convert::TryInto as _,
             ptr::{self, NonNull},
         };
+
+        use crate::util::testutil::*;
 
         // This test synthesizes pointers with various metadata and uses Rust's
         // built-in APIs to confirm that Rust makes decisions about type layout
@@ -1128,7 +1647,7 @@ mod tests {
                         size: args.offset + util::padding_needed_for(args.offset, args.align),
                     },
                 };
-                DstLayout { size_info, align: args.align }
+                DstLayout { size_info, align: args.align, statically_shallow_unpadded: false }
             };
 
             for elems in 0..128 {
@@ -1138,7 +1657,6 @@ mod tests {
                     let slc_field_ptr = addr_of_slice_field(ptr).as_ptr();
                     // SAFETY: Both `slc_field_ptr` and `ptr` are pointers to
                     // the same valid Rust object.
-                    #[allow(clippy::incompatible_msrv)]
                     // Work around https://github.com/rust-lang/rust-clippy/issues/12280
                     let offset: usize =
                         unsafe { slc_field_ptr.byte_offset_from(ptr.as_ptr()).try_into().unwrap() };
@@ -1146,6 +1664,7 @@ mod tests {
                 }
 
                 // SAFETY: `ptr` points to a valid `T`.
+                #[allow(clippy::multiple_unsafe_ops_per_block)]
                 let (size, align) = unsafe {
                     (mem::size_of_val_raw(ptr.as_ptr()), mem::align_of_val_raw(ptr.as_ptr()))
                 };
@@ -1452,7 +1971,7 @@ mod proofs {
                 match size_info {
                     SizeInfo::Sized { size } => Layout::from_size_align(size, align.get()),
                     SizeInfo::SliceDst(TrailingSliceLayout { offset, elem_size: _ }) => {
-                        // `SliceDst`` cannot encode an exact size, but we know
+                        // `SliceDst` cannot encode an exact size, but we know
                         // it is at least `offset` bytes.
                         Layout::from_size_align(offset, align.get())
                     }
@@ -1460,7 +1979,7 @@ mod proofs {
                 .is_ok(),
             );
 
-            Self { align: align, size_info: size_info }
+            Self { align: align, size_info: size_info, statically_shallow_unpadded: kani::any() }
         }
     }
 
@@ -1472,7 +1991,7 @@ mod proofs {
                 true => {
                     let size: usize = kani::any();
 
-                    kani::assume(size <= isize::MAX as _);
+                    kani::assume(size <= DstLayout::MAX_SIZE);
 
                     SizeInfo::Sized { size }
                 }
@@ -1486,10 +2005,46 @@ mod proofs {
             let elem_size: usize = kani::any();
             let offset: usize = kani::any();
 
-            kani::assume(elem_size < isize::MAX as _);
-            kani::assume(offset < isize::MAX as _);
+            kani::assume(elem_size < DstLayout::MAX_SIZE);
+            kani::assume(offset < DstLayout::MAX_SIZE);
 
             TrailingSliceLayout { elem_size, offset }
+        }
+    }
+
+    #[kani::proof]
+    fn prove_requires_dynamic_padding() {
+        let layout: DstLayout = kani::any();
+
+        let SizeInfo::SliceDst(size_info) = layout.size_info else {
+            kani::assume(false);
+            loop {}
+        };
+
+        let meta: usize = kani::any();
+
+        let Some(trailing_slice_size) = size_info.elem_size.checked_mul(meta) else {
+            // The `trailing_slice_size` exceeds `usize::MAX`; `meta` is invalid.
+            kani::assume(false);
+            loop {}
+        };
+
+        let Some(unpadded_size) = size_info.offset.checked_add(trailing_slice_size) else {
+            // The `unpadded_size` exceeds `usize::MAX`; `meta`` is invalid.
+            kani::assume(false);
+            loop {}
+        };
+
+        if unpadded_size >= DstLayout::MAX_SIZE {
+            // The `unpadded_size` exceeds `isize::MAX`; `meta` is invalid.
+            kani::assume(false);
+            loop {}
+        }
+
+        let trailing_padding = util::padding_needed_for(unpadded_size, layout.align);
+
+        if !layout.requires_dynamic_padding() {
+            assert!(trailing_padding == 0);
         }
     }
 
@@ -1640,7 +2195,7 @@ mod proofs {
 
         let layout: DstLayout = kani::any();
 
-        let padded: DstLayout = layout.pad_to_align();
+        let padded = layout.pad_to_align();
 
         // Calling `pad_to_align` does not alter the `DstLayout`'s alignment.
         assert_eq!(padded.align, layout.align);

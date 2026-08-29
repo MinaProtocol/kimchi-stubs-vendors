@@ -86,7 +86,7 @@ pub trait FromMeta: Sized {
     /// and users who add a `String` field to their `FromMeta`-deriving struct would be surprised
     /// if they get back `""` instead of a missing field error when that field is omitted.
     ///
-    /// The primary use-case for this is `Option<T>` fields gracefully handlling absence without
+    /// The primary use-case for this is `Option<T>` fields gracefully handling absence without
     /// needing `#[darling(default)]`.
     fn from_none() -> Option<Self> {
         None
@@ -161,6 +161,31 @@ pub trait FromMeta: Sized {
 impl FromMeta for () {
     fn from_word() -> Result<Self> {
         Ok(())
+    }
+
+    fn from_list(items: &[NestedMeta]) -> Result<Self> {
+        let mut errors = Error::accumulator();
+        for item in items {
+            errors.push(match item {
+                // Use `unknown_field_path` rather than `too_many_items` so that when this is used with
+                // `flatten` the resulting error message will include the valid fields rather than a confusing
+                // message about having only expected zero items.
+                //
+                // The accumulator is used to ensure all these errors are returned at once, rather than
+                // only producing an error on the first unexpected field in the flattened list.
+                NestedMeta::Meta(meta) => Error::unknown_field_path(meta.path()).with_span(meta),
+                NestedMeta::Lit(lit) => Error::unexpected_expr_type(
+                    &(syn::ExprLit {
+                        attrs: vec![],
+                        lit: lit.clone(),
+                    }
+                    .into()),
+                )
+                .with_span(lit),
+            });
+        }
+
+        errors.finish()
     }
 }
 
@@ -462,7 +487,6 @@ from_syn_parse!(syn::TypeMacro);
 from_syn_parse!(syn::TypeNever);
 from_syn_parse!(syn::TypeParam);
 from_syn_parse!(syn::TypeParen);
-from_syn_parse!(syn::TypePath);
 from_syn_parse!(syn::TypePtr);
 from_syn_parse!(syn::TypeReference);
 from_syn_parse!(syn::TypeSlice);
@@ -470,6 +494,39 @@ from_syn_parse!(syn::TypeTraitObject);
 from_syn_parse!(syn::TypeTuple);
 from_syn_parse!(syn::Visibility);
 from_syn_parse!(syn::WhereClause);
+
+impl FromMeta for syn::TypePath {
+    /// Supports both quote-wrapped and bare values.
+    fn from_expr(expr: &Expr) -> Result<Self> {
+        match expr {
+            Expr::Path(body) => {
+                if body.attrs.is_empty() {
+                    Ok(syn::TypePath {
+                        qself: body.qself.clone(),
+                        path: body.path.clone(),
+                    })
+                } else {
+                    Err(Error::custom("attributes are not allowed").with_span(body))
+                }
+            }
+            Expr::Lit(expr_lit) => Self::from_value(&expr_lit.lit),
+            Expr::Group(group) => Self::from_expr(&group.expr),
+            _ => Err(Error::unexpected_expr_type(expr)),
+        }
+    }
+
+    fn from_string(value: &str) -> Result<Self> {
+        syn::parse_str(value).map_err(|_| Error::unknown_value(value))
+    }
+
+    fn from_value(value: &Lit) -> Result<Self> {
+        if let Lit::Str(ref v) = *value {
+            v.parse().map_err(|_| Error::unknown_lit_str_value(v))
+        } else {
+            Err(Error::unexpected_lit_type(value))
+        }
+    }
+}
 
 macro_rules! from_numeric_array {
     ($ty:ident) => {
@@ -836,6 +893,13 @@ mod tests {
     #[test]
     fn unit_succeeds() {
         fm::<()>(quote!(ignore));
+        fm::<()>(quote!(ignore()));
+    }
+
+    #[test]
+    #[should_panic(expected = "UnknownField")]
+    fn unit_fails() {
+        fm::<()>(quote!(ignore(foo = "bar")));
     }
 
     #[test]
@@ -887,7 +951,7 @@ mod tests {
         assert_eq!(fm::<f64>(quote!(ignore = "1.4e10")), 1.4e10);
     }
 
-    #[should_panic(expected = "UnknownValue(\"0\")")]
+    #[should_panic(expected = "UnknownValue")]
     #[test]
     fn nonzero_number_fails() {
         fm::<NonZeroU64>(quote!(ignore = "0"));

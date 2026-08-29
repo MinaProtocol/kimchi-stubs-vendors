@@ -7,12 +7,12 @@
 /// The macro takes four arguments:
 ///
 /// 1. The name of the converter type.
-///     The type can be prefixed with a visibility modifies like `pub` or `pub(crate)`.
-///     By default, the type is not marked as public (`pub(self)`).
+///    The type can be prefixed with a visibility modifies like `pub` or `pub(crate)`.
+///    By default, the type is not marked as public (`pub(self)`).
 /// 2. The type `T` we want to extend with custom behavior.
 /// 3. A function or macro taking a `&T` and returning a serializable type.
 /// 4. A function or macro taking a deserializable type and returning a `Result<T, E>`.
-///     The error type `E` must implement [`Display`].
+///    The error type `E` must implement [`Display`].
 ///
 /// [`Display`]: std::fmt::Display
 ///
@@ -34,6 +34,7 @@
 /// }
 ///
 /// serde_with::serde_conv!(
+///     #[doc = "Serialize and deserialize `Rgb` as `[u8; 3]`."]
 ///     RgbAsArray,
 ///     Rgb,
 ///     |rgb: &Rgb| [rgb.red, rgb.green, rgb.blue],
@@ -105,9 +106,10 @@
 /// ```
 #[macro_export]
 macro_rules! serde_conv {
-    ($m:ident, $t:ty, $ser:expr, $de:expr) => {$crate::serde_conv!(pub(self) $m, $t, $ser, $de);};
-    ($vis:vis $m:ident, $t:ty, $ser:expr, $de:expr) => {
+    ($(#[$attr:meta])* $m:ident, $t:ty, $ser:expr, $de:expr) => {$crate::serde_conv!($(#[$attr])* pub(self) $m, $t, $ser, $de);};
+    ($(#[$attr:meta])* $vis:vis $m:ident, $t:ty, $ser:expr, $de:expr) => {
         #[allow(non_camel_case_types)]
+        $(#[$attr])*
         $vis struct $m;
 
         // Prevent clippy lints triggering because of the template here
@@ -118,25 +120,25 @@ macro_rules! serde_conv {
             impl $m {
                 $vis fn serialize<S>(x: &$t, serializer: S) -> $crate::__private__::Result<S::Ok, S::Error>
                 where
-                    S: $crate::serde::Serializer,
+                    S: $crate::__private__::Serializer,
                 {
                     let y = $ser(x);
-                    $crate::serde::Serialize::serialize(&y, serializer)
+                    $crate::__private__::Serialize::serialize(&y, serializer)
                 }
 
                 $vis fn deserialize<'de, D>(deserializer: D) -> $crate::__private__::Result<$t, D::Error>
                 where
-                    D: $crate::serde::Deserializer<'de>,
+                    D: $crate::__private__::Deserializer<'de>,
                 {
-                    let y = $crate::serde::Deserialize::deserialize(deserializer)?;
-                    $de(y).map_err($crate::serde::de::Error::custom)
+                    let y = $crate::__private__::Deserialize::deserialize(deserializer)?;
+                    $de(y).map_err($crate::__private__::DeError::custom)
                 }
             }
 
             impl $crate::SerializeAs<$t> for $m {
                 fn serialize_as<S>(x: &$t, serializer: S) -> $crate::__private__::Result<S::Ok, S::Error>
                 where
-                    S: $crate::serde::Serializer,
+                    S: $crate::__private__::Serializer,
                 {
                     Self::serialize(x, serializer)
                 }
@@ -145,7 +147,7 @@ macro_rules! serde_conv {
             impl<'de> $crate::DeserializeAs<'de, $t> for $m {
                 fn deserialize_as<D>(deserializer: D) -> $crate::__private__::Result<$t, D::Error>
                 where
-                    D: $crate::serde::Deserializer<'de>,
+                    D: $crate::__private__::Deserializer<'de>,
                 {
                     Self::deserialize(deserializer)
                 }

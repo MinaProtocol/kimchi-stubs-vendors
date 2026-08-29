@@ -10,6 +10,8 @@
 
 //! Temporal quantification
 
+#[cfg(all(not(feature = "std"), feature = "core-error"))]
+use core::error::Error;
 use core::fmt;
 use core::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 use core::time::Duration;
@@ -57,6 +59,7 @@ const SECS_PER_WEEK: i64 = 604_800;
     archive_attr(derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash))
 )]
 #[cfg_attr(feature = "rkyv-validation", archive(check_bytes))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct TimeDelta {
     secs: i64,
     nanos: i32, // Always 0 <= nanos < NANOS_PER_SEC
@@ -102,6 +105,7 @@ impl TimeDelta {
     /// Panics when the duration is out of bounds.
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const fn weeks(weeks: i64) -> TimeDelta {
         expect(TimeDelta::try_weeks(weeks), "TimeDelta::weeks out of bounds")
     }
@@ -129,6 +133,7 @@ impl TimeDelta {
     /// Panics when the `TimeDelta` would be out of bounds.
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const fn days(days: i64) -> TimeDelta {
         expect(TimeDelta::try_days(days), "TimeDelta::days out of bounds")
     }
@@ -155,6 +160,7 @@ impl TimeDelta {
     /// Panics when the `TimeDelta` would be out of bounds.
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const fn hours(hours: i64) -> TimeDelta {
         expect(TimeDelta::try_hours(hours), "TimeDelta::hours out of bounds")
     }
@@ -180,6 +186,7 @@ impl TimeDelta {
     /// Panics when the `TimeDelta` would be out of bounds.
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const fn minutes(minutes: i64) -> TimeDelta {
         expect(TimeDelta::try_minutes(minutes), "TimeDelta::minutes out of bounds")
     }
@@ -204,6 +211,7 @@ impl TimeDelta {
     /// (in this context, this is the same as `i64::MIN / 1_000` due to rounding).
     #[inline]
     #[must_use]
+    #[track_caller]
     pub const fn seconds(seconds: i64) -> TimeDelta {
         expect(TimeDelta::try_seconds(seconds), "TimeDelta::seconds out of bounds")
     }
@@ -227,6 +235,7 @@ impl TimeDelta {
     /// Panics when the `TimeDelta` would be out of bounds, i.e. when `milliseconds` is more than
     /// `i64::MAX` or less than `-i64::MAX`. Notably, this is not the same as `i64::MIN`.
     #[inline]
+    #[track_caller]
     pub const fn milliseconds(milliseconds: i64) -> TimeDelta {
         expect(TimeDelta::try_milliseconds(milliseconds), "TimeDelta::milliseconds out of bounds")
     }
@@ -304,11 +313,14 @@ impl TimeDelta {
         if self.secs < 0 && self.nanos > 0 { self.secs + 1 } else { self.secs }
     }
 
-    /// Returns the number of nanoseconds such that
-    /// `subsec_nanos() + num_seconds() * NANOS_PER_SEC` is the total number of
-    /// nanoseconds in the `TimeDelta`.
-    pub const fn subsec_nanos(&self) -> i32 {
-        if self.secs < 0 && self.nanos > 0 { self.nanos - NANOS_PER_SEC } else { self.nanos }
+    /// Returns the fractional number of seconds in the `TimeDelta`.
+    pub fn as_seconds_f64(self) -> f64 {
+        self.secs as f64 + self.nanos as f64 / NANOS_PER_SEC as f64
+    }
+
+    /// Returns the fractional number of seconds in the `TimeDelta`.
+    pub fn as_seconds_f32(self) -> f32 {
+        self.secs as f32 + self.nanos as f32 / NANOS_PER_SEC as f32
     }
 
     /// Returns the total number of whole milliseconds in the `TimeDelta`.
@@ -321,6 +333,15 @@ impl TimeDelta {
         secs_part + nanos_part as i64
     }
 
+    /// Returns the number of milliseconds in the fractional part of the duration.
+    ///
+    /// This is the number of milliseconds such that
+    /// `subsec_millis() + num_seconds() * 1_000` is the truncated number of
+    /// milliseconds in the duration.
+    pub const fn subsec_millis(&self) -> i32 {
+        self.subsec_nanos() / NANOS_PER_MILLI
+    }
+
     /// Returns the total number of whole microseconds in the `TimeDelta`,
     /// or `None` on overflow (exceeding 2^63 microseconds in either direction).
     pub const fn num_microseconds(&self) -> Option<i64> {
@@ -329,12 +350,30 @@ impl TimeDelta {
         secs_part.checked_add(nanos_part as i64)
     }
 
+    /// Returns the number of microseconds in the fractional part of the duration.
+    ///
+    /// This is the number of microseconds such that
+    /// `subsec_micros() + num_seconds() * 1_000_000` is the truncated number of
+    /// microseconds in the duration.
+    pub const fn subsec_micros(&self) -> i32 {
+        self.subsec_nanos() / NANOS_PER_MICRO
+    }
+
     /// Returns the total number of whole nanoseconds in the `TimeDelta`,
     /// or `None` on overflow (exceeding 2^63 nanoseconds in either direction).
     pub const fn num_nanoseconds(&self) -> Option<i64> {
         let secs_part = try_opt!(self.num_seconds().checked_mul(NANOS_PER_SEC as i64));
         let nanos_part = self.subsec_nanos();
         secs_part.checked_add(nanos_part as i64)
+    }
+
+    /// Returns the number of nanoseconds in the fractional part of the duration.
+    ///
+    /// This is the number of nanoseconds such that
+    /// `subsec_nanos() + num_seconds() * 1_000_000_000` is the total number of
+    /// nanoseconds in the `TimeDelta`.
+    pub const fn subsec_nanos(&self) -> i32 {
+        if self.secs < 0 && self.nanos > 0 { self.nanos - NANOS_PER_SEC } else { self.nanos }
     }
 
     /// Add two `TimeDelta`s, returning `None` if overflow occurred.
@@ -481,6 +520,7 @@ impl Neg for TimeDelta {
     type Output = TimeDelta;
 
     #[inline]
+    #[track_caller]
     fn neg(self) -> TimeDelta {
         let (secs_diff, nanos) = match self.nanos {
             0 => (0, 0),
@@ -493,6 +533,7 @@ impl Neg for TimeDelta {
 impl Add for TimeDelta {
     type Output = TimeDelta;
 
+    #[track_caller]
     fn add(self, rhs: TimeDelta) -> TimeDelta {
         self.checked_add(&rhs).expect("`TimeDelta + TimeDelta` overflowed")
     }
@@ -501,12 +542,14 @@ impl Add for TimeDelta {
 impl Sub for TimeDelta {
     type Output = TimeDelta;
 
+    #[track_caller]
     fn sub(self, rhs: TimeDelta) -> TimeDelta {
         self.checked_sub(&rhs).expect("`TimeDelta - TimeDelta` overflowed")
     }
 }
 
 impl AddAssign for TimeDelta {
+    #[track_caller]
     fn add_assign(&mut self, rhs: TimeDelta) {
         let new = self.checked_add(&rhs).expect("`TimeDelta + TimeDelta` overflowed");
         *self = new;
@@ -514,6 +557,7 @@ impl AddAssign for TimeDelta {
 }
 
 impl SubAssign for TimeDelta {
+    #[track_caller]
     fn sub_assign(&mut self, rhs: TimeDelta) {
         let new = self.checked_sub(&rhs).expect("`TimeDelta - TimeDelta` overflowed");
         *self = new;
@@ -523,6 +567,7 @@ impl SubAssign for TimeDelta {
 impl Mul<i32> for TimeDelta {
     type Output = TimeDelta;
 
+    #[track_caller]
     fn mul(self, rhs: i32) -> TimeDelta {
         self.checked_mul(rhs).expect("`TimeDelta * i32` overflowed")
     }
@@ -531,6 +576,7 @@ impl Mul<i32> for TimeDelta {
 impl Div<i32> for TimeDelta {
     type Output = TimeDelta;
 
+    #[track_caller]
     fn div(self, rhs: i32) -> TimeDelta {
         self.checked_div(rhs).expect("`i32` is zero")
     }
@@ -557,7 +603,7 @@ impl fmt::Display for TimeDelta {
         // but we need to print it anyway.
         let (abs, sign) = if self.secs < 0 { (-*self, "-") } else { (*self, "") };
 
-        write!(f, "{}P", sign)?;
+        write!(f, "{sign}P")?;
         // Plenty of ways to encode an empty string. `P0D` is short and not too strange.
         if abs.secs == 0 && abs.nanos == 0 {
             return f.write_str("0D");
@@ -578,7 +624,7 @@ impl fmt::Display for TimeDelta {
                 fraction_digits = div;
                 figures -= 1;
             }
-            f.write_fmt(format_args!(".{:01$}", fraction_digits, figures))?;
+            f.write_fmt(format_args!(".{fraction_digits:0figures$}"))?;
         }
         f.write_str("S")?;
         Ok(())
@@ -592,6 +638,7 @@ impl fmt::Display for TimeDelta {
 /// *seconds*, while this module supports signed range of up to
 /// `i64::MAX` of *milliseconds*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct OutOfRangeError(());
 
 impl fmt::Display for OutOfRangeError {
@@ -600,7 +647,7 @@ impl fmt::Display for OutOfRangeError {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", feature = "core-error"))]
 impl Error for OutOfRangeError {
     #[allow(deprecated)]
     fn description(&self) -> &str {
@@ -766,6 +813,61 @@ mod tests {
     #[should_panic(expected = "TimeDelta::seconds out of bounds")]
     fn test_duration_seconds_min_underflow_panic() {
         let _ = TimeDelta::seconds(-i64::MAX / 1_000 - 1);
+    }
+
+    #[test]
+    fn test_duration_as_seconds_f64() {
+        assert_eq!(TimeDelta::seconds(1).as_seconds_f64(), 1.0);
+        assert_eq!(TimeDelta::seconds(-1).as_seconds_f64(), -1.0);
+        assert_eq!(TimeDelta::seconds(100).as_seconds_f64(), 100.0);
+        assert_eq!(TimeDelta::seconds(-100).as_seconds_f64(), -100.0);
+
+        assert_eq!(TimeDelta::milliseconds(500).as_seconds_f64(), 0.5);
+        assert_eq!(TimeDelta::milliseconds(-500).as_seconds_f64(), -0.5);
+        assert_eq!(TimeDelta::milliseconds(1_500).as_seconds_f64(), 1.5);
+        assert_eq!(TimeDelta::milliseconds(-1_500).as_seconds_f64(), -1.5);
+    }
+
+    #[test]
+    fn test_duration_as_seconds_f32() {
+        assert_eq!(TimeDelta::seconds(1).as_seconds_f32(), 1.0);
+        assert_eq!(TimeDelta::seconds(-1).as_seconds_f32(), -1.0);
+        assert_eq!(TimeDelta::seconds(100).as_seconds_f32(), 100.0);
+        assert_eq!(TimeDelta::seconds(-100).as_seconds_f32(), -100.0);
+
+        assert_eq!(TimeDelta::milliseconds(500).as_seconds_f32(), 0.5);
+        assert_eq!(TimeDelta::milliseconds(-500).as_seconds_f32(), -0.5);
+        assert_eq!(TimeDelta::milliseconds(1_500).as_seconds_f32(), 1.5);
+        assert_eq!(TimeDelta::milliseconds(-1_500).as_seconds_f32(), -1.5);
+    }
+
+    #[test]
+    fn test_duration_subsec_nanos() {
+        assert_eq!(TimeDelta::zero().subsec_nanos(), 0);
+        assert_eq!(TimeDelta::nanoseconds(1).subsec_nanos(), 1);
+        assert_eq!(TimeDelta::nanoseconds(-1).subsec_nanos(), -1);
+        assert_eq!(TimeDelta::seconds(1).subsec_nanos(), 0);
+        assert_eq!(TimeDelta::nanoseconds(1_000_000_001).subsec_nanos(), 1);
+    }
+
+    #[test]
+    fn test_duration_subsec_micros() {
+        assert_eq!(TimeDelta::zero().subsec_micros(), 0);
+        assert_eq!(TimeDelta::microseconds(1).subsec_micros(), 1);
+        assert_eq!(TimeDelta::microseconds(-1).subsec_micros(), -1);
+        assert_eq!(TimeDelta::seconds(1).subsec_micros(), 0);
+        assert_eq!(TimeDelta::microseconds(1_000_001).subsec_micros(), 1);
+        assert_eq!(TimeDelta::nanoseconds(1_000_001_999).subsec_micros(), 1);
+    }
+
+    #[test]
+    fn test_duration_subsec_millis() {
+        assert_eq!(TimeDelta::zero().subsec_millis(), 0);
+        assert_eq!(TimeDelta::milliseconds(1).subsec_millis(), 1);
+        assert_eq!(TimeDelta::milliseconds(-1).subsec_millis(), -1);
+        assert_eq!(TimeDelta::seconds(1).subsec_millis(), 0);
+        assert_eq!(TimeDelta::milliseconds(1_001).subsec_millis(), 1);
+        assert_eq!(TimeDelta::microseconds(1_001_999).subsec_millis(), 1);
     }
 
     #[test]

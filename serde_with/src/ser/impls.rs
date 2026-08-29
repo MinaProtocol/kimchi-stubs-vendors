@@ -4,10 +4,16 @@ use crate::{formats::Strictness, prelude::*};
 use hashbrown_0_14::{HashMap as HashbrownMap014, HashSet as HashbrownSet014};
 #[cfg(feature = "hashbrown_0_15")]
 use hashbrown_0_15::{HashMap as HashbrownMap015, HashSet as HashbrownSet015};
+#[cfg(feature = "hashbrown_0_16")]
+use hashbrown_0_16::{HashMap as HashbrownMap016, HashSet as HashbrownSet016};
+#[cfg(feature = "hashbrown_0_17")]
+use hashbrown_0_17::{HashMap as HashbrownMap017, HashSet as HashbrownSet017};
 #[cfg(feature = "indexmap_1")]
 use indexmap_1::{IndexMap, IndexSet};
 #[cfg(feature = "indexmap_2")]
 use indexmap_2::{IndexMap as IndexMap2, IndexSet as IndexSet2};
+#[cfg(feature = "smallvec_1")]
+use smallvec_1::SmallVec;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Helper macro used internally
@@ -33,6 +39,10 @@ pub(crate) mod macros {
         $m!(HashbrownMap014<K, V, H: Sized>);
         #[cfg(feature = "hashbrown_0_15")]
         $m!(HashbrownMap015<K, V, H: Sized>);
+        #[cfg(feature = "hashbrown_0_16")]
+        $m!(HashbrownMap016<K, V, H: Sized>);
+        #[cfg(feature = "hashbrown_0_17")]
+        $m!(HashbrownMap017<K, V, H: Sized>);
         #[cfg(feature = "indexmap_1")]
         $m!(IndexMap<K, V, H: Sized>);
         #[cfg(feature = "indexmap_2")]
@@ -50,6 +60,10 @@ pub(crate) mod macros {
         $m!(HashbrownSet014<$T, H: Sized>);
         #[cfg(feature = "hashbrown_0_15")]
         $m!(HashbrownSet015<$T, H: Sized>);
+        #[cfg(feature = "hashbrown_0_16")]
+        $m!(HashbrownSet016<$T, H: Sized>);
+        #[cfg(feature = "hashbrown_0_17")]
+        $m!(HashbrownSet017<$T, H: Sized>);
         #[cfg(feature = "indexmap_1")]
         $m!(IndexSet<$T, H: Sized>);
         #[cfg(feature = "indexmap_2")]
@@ -182,8 +196,8 @@ where
     {
         match source {
             Bound::Unbounded => Bound::Unbounded,
-            Bound::Included(ref v) => Bound::Included(SerializeAsWrap::<T, U>::new(v)),
-            Bound::Excluded(ref v) => Bound::Excluded(SerializeAsWrap::<T, U>::new(v)),
+            Bound::Included(v) => Bound::Included(SerializeAsWrap::<T, U>::new(v)),
+            Bound::Excluded(v) => Bound::Excluded(SerializeAsWrap::<T, U>::new(v)),
         }
         .serialize(serializer)
     }
@@ -344,6 +358,72 @@ where
 
 // endregion
 ///////////////////////////////////////////////////////////////////////////////
+// region: More complex wrappers that are not just a single value
+
+impl<Idx, IdxAs> SerializeAs<Range<Idx>> for Range<IdxAs>
+where
+    IdxAs: SerializeAs<Idx>,
+{
+    fn serialize_as<S>(value: &Range<Idx>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        Range {
+            start: SerializeAsWrap::<Idx, IdxAs>::new(&value.start),
+            end: SerializeAsWrap::<Idx, IdxAs>::new(&value.end),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<Idx, IdxAs> SerializeAs<RangeFrom<Idx>> for RangeFrom<IdxAs>
+where
+    IdxAs: SerializeAs<Idx>,
+{
+    fn serialize_as<S>(value: &RangeFrom<Idx>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        RangeFrom {
+            start: SerializeAsWrap::<Idx, IdxAs>::new(&value.start),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<Idx, IdxAs> SerializeAs<RangeInclusive<Idx>> for RangeInclusive<IdxAs>
+where
+    IdxAs: SerializeAs<Idx>,
+{
+    fn serialize_as<S>(value: &RangeInclusive<Idx>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        RangeInclusive::new(
+            SerializeAsWrap::<Idx, IdxAs>::new(value.start()),
+            SerializeAsWrap::<Idx, IdxAs>::new(value.end()),
+        )
+        .serialize(serializer)
+    }
+}
+
+impl<Idx, IdxAs> SerializeAs<RangeTo<Idx>> for RangeTo<IdxAs>
+where
+    IdxAs: SerializeAs<Idx>,
+{
+    fn serialize_as<S>(value: &RangeTo<Idx>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        RangeTo {
+            end: SerializeAsWrap::<Idx, IdxAs>::new(&value.end),
+        }
+        .serialize(serializer)
+    }
+}
+
+// endregion
+///////////////////////////////////////////////////////////////////////////////
 // region: Collection Types (e.g., Maps, Sets, Vec)
 
 macro_rules! seq_impl {
@@ -364,6 +444,22 @@ macro_rules! seq_impl {
     }
 }
 foreach_seq!(seq_impl);
+
+// SmallVec implementation
+#[cfg(feature = "smallvec_1")]
+impl<A, B> SerializeAs<SmallVec<A>> for SmallVec<B>
+where
+    A: smallvec_1::Array,
+    B: smallvec_1::Array,
+    B::Item: SerializeAs<A::Item>,
+{
+    fn serialize_as<S>(source: &SmallVec<A>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_seq(source.iter().map(SerializeAsWrap::<A::Item, B::Item>::new))
+    }
+}
 
 #[cfg(feature = "alloc")]
 macro_rules! map_impl {
@@ -395,7 +491,6 @@ macro_rules! tuple_impl {
             where
                 S: Serializer,
             {
-                use serde::ser::SerializeTuple;
                 let mut tup = serializer.serialize_tuple($len)?;
                 $(
                     tup.serialize_element(&SerializeAsWrap::<$t, $tas>::new(&tuple.$n))?;
@@ -579,6 +674,40 @@ where
             serializer.serialize_str("")
         }
     }
+}
+
+macro_rules! none_as_zero_serialize {
+    ($($nonzero:ident => $primitive:ident),* $(,)?) => {
+        $(
+            impl SerializeAs<Option<core::num::$nonzero>> for NoneAsZero {
+                fn serialize_as<S>(
+                    source: &Option<core::num::$nonzero>,
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error>
+                where
+                    S: Serializer,
+                {
+                    let value: $primitive = source.map_or(0, core::num::$nonzero::get);
+                    value.serialize(serializer)
+                }
+            }
+        )*
+    };
+}
+
+none_as_zero_serialize! {
+    NonZeroU8    => u8,
+    NonZeroU16   => u16,
+    NonZeroU32   => u32,
+    NonZeroU64   => u64,
+    NonZeroU128  => u128,
+    NonZeroUsize => usize,
+    NonZeroI8    => i8,
+    NonZeroI16   => i16,
+    NonZeroI32   => i32,
+    NonZeroI64   => i64,
+    NonZeroI128  => i128,
+    NonZeroIsize => isize,
 }
 
 #[cfg(feature = "alloc")]
@@ -847,32 +976,73 @@ impl<'a, const N: usize> SerializeAs<Cow<'a, [u8; N]>> for Bytes {
 }
 
 #[cfg(feature = "alloc")]
-impl<T, U> SerializeAs<Vec<T>> for OneOrMany<U, formats::PreferOne>
+macro_rules! one_or_many_impl {
+    ($ty:ident < T $(: $tbound1:ident $(+ $tbound2:ident)*)* $(, $typaram:ident : $bound:ident )* >) => {
+        impl<T, U $(, $typaram)*> SerializeAs<$ty<T $(, $typaram)*>> for OneOrMany<U, formats::PreferOne>
+        where
+            U: SerializeAs<T>,
+            $(T: ?Sized + $tbound1 $(+ $tbound2)*,)*
+            $($typaram: ?Sized + $bound,)*
+        {
+            fn serialize_as<S>(source: &$ty<T $(, $typaram)*>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match source.len() {
+                    1 => SerializeAsWrap::<T, U>::new(source.iter().next().expect("Cannot be empty"))
+                        .serialize(serializer),
+                    _ => serializer.collect_seq(source.iter().map(|item| SerializeAsWrap::<T, U>::new(item))),
+                }
+            }
+        }
+
+        impl<T, U $(, $typaram)*> SerializeAs<$ty<T $(, $typaram)*>> for OneOrMany<U, formats::PreferMany>
+        where
+            U: SerializeAs<T>,
+            $(T: ?Sized + $tbound1 $(+ $tbound2)*,)*
+            $($typaram: ?Sized + $bound,)*
+        {
+            fn serialize_as<S>(source: &$ty<T $(, $typaram)*>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                serializer.collect_seq(source.iter().map(|item| SerializeAsWrap::<T, U>::new(item)))
+            }
+        }
+    }
+}
+#[cfg(feature = "alloc")]
+foreach_seq!(one_or_many_impl);
+
+#[cfg(all(feature = "alloc", feature = "smallvec_1"))]
+impl<T, TAs, A> SerializeAs<SmallVec<A>> for OneOrMany<TAs, formats::PreferOne>
 where
-    U: SerializeAs<T>,
+    A: smallvec_1::Array<Item = T>,
+    TAs: SerializeAs<T>,
 {
-    fn serialize_as<S>(source: &Vec<T>, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_as<S>(source: &SmallVec<A>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match source.len() {
-            1 => SerializeAsWrap::<T, U>::new(source.iter().next().expect("Cannot be empty"))
+            1 => SerializeAsWrap::<T, TAs>::new(source.iter().next().expect("Cannot be empty"))
                 .serialize(serializer),
-            _ => SerializeAsWrap::<Vec<T>, Vec<U>>::new(source).serialize(serializer),
+            _ => SerializeAsWrap::<&[T], &[TAs]>::new(&source.as_slice()).serialize(serializer),
         }
     }
 }
 
-#[cfg(feature = "alloc")]
-impl<T, U> SerializeAs<Vec<T>> for OneOrMany<U, formats::PreferMany>
+#[cfg(all(feature = "alloc", feature = "smallvec_1"))]
+impl<T, TAs, A> SerializeAs<SmallVec<A>> for OneOrMany<TAs, formats::PreferMany>
 where
-    U: SerializeAs<T>,
+    A: smallvec_1::Array<Item = T>,
+    TAs: SerializeAs<T>,
 {
-    fn serialize_as<S>(source: &Vec<T>, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_as<S>(source: &SmallVec<A>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        SerializeAsWrap::<Vec<T>, Vec<U>>::new(source).serialize(serializer)
+        SerializeAsWrap::<&[T], &[TAs]>::new(&source.as_slice()).serialize(serializer)
     }
 }
 

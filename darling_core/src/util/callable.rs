@@ -1,4 +1,5 @@
 use quote::ToTokens;
+use syn::{Expr, ExprClosure, ExprLit, ExprPath, Lit, Path};
 
 use crate::{Error, FromMeta, Result};
 
@@ -15,41 +16,59 @@ use crate::{Error, FromMeta, Result};
 #[derive(Debug, Clone)]
 pub struct Callable {
     /// The callable
-    call: syn::Expr,
+    call: Expr,
 }
 
-impl AsRef<syn::Expr> for Callable {
-    fn as_ref(&self) -> &syn::Expr {
+impl AsRef<Expr> for Callable {
+    fn as_ref(&self) -> &Expr {
         &self.call
     }
 }
 
-impl From<syn::ExprPath> for Callable {
-    fn from(value: syn::ExprPath) -> Self {
+impl From<Path> for Callable {
+    fn from(path: Path) -> Self {
+        Self::from(ExprPath {
+            attrs: vec![],
+            qself: None,
+            path,
+        })
+    }
+}
+
+impl From<ExprPath> for Callable {
+    fn from(value: ExprPath) -> Self {
         Self {
-            call: syn::Expr::Path(value),
+            call: Expr::Path(value),
         }
     }
 }
 
-impl From<syn::ExprClosure> for Callable {
-    fn from(value: syn::ExprClosure) -> Self {
+impl From<ExprClosure> for Callable {
+    fn from(value: ExprClosure) -> Self {
         Self {
-            call: syn::Expr::Closure(value),
+            call: Expr::Closure(value),
         }
     }
 }
 
-impl From<Callable> for syn::Expr {
+impl From<Callable> for Expr {
     fn from(value: Callable) -> Self {
         value.call
     }
 }
 
 impl FromMeta for Callable {
-    fn from_expr(expr: &syn::Expr) -> Result<Self> {
+    fn from_expr(expr: &Expr) -> Result<Self> {
         match expr {
-            syn::Expr::Path(_) | syn::Expr::Closure(_) => Ok(Self { call: expr.clone() }),
+            Expr::Path(_) | Expr::Closure(_) => Ok(Self { call: expr.clone() }),
+            Expr::Lit(ExprLit {
+                lit: Lit::Str(s), ..
+            }) => s
+                .parse::<Path>()
+                .map_err(|e| {
+                    Error::custom(format!("must be a path if it's a string: {}", e)).with_span(s)
+                })
+                .map(Self::from),
             _ => Err(Error::unexpected_expr_type(expr)),
         }
     }

@@ -2,6 +2,7 @@ use darling::{Error, FromMeta};
 use syn::parse_quote;
 
 #[derive(Debug, FromMeta)]
+#[darling(derive_syn_parse)]
 struct Meta {
     #[darling(default)]
     meta1: Option<String>,
@@ -65,6 +66,17 @@ fn nested_meta_lit_bool_errors() {
     );
 }
 
+#[test]
+fn parse_impl() {
+    let meta = parse_quote! {
+        meta1 = "thefeature",
+        meta2
+    };
+    let parsed_meta: Meta = syn::parse2(meta).unwrap();
+    assert_eq!(parsed_meta.meta1, Some("thefeature".to_string()));
+    assert!(parsed_meta.meta2);
+}
+
 /// Tests behavior of FromMeta implementation for enums.
 mod enum_impl {
     use darling::{Error, FromMeta};
@@ -105,6 +117,104 @@ mod enum_impl {
     fn multiple_values_list_errors() {
         let err = Volume::from_list(&[parse_quote!(low), parse_quote!(dB = 20)]).unwrap_err();
         assert_eq!(err.to_string(), Error::too_many_items(1).to_string());
+    }
+}
+
+mod keyword {
+    use darling::FromMeta;
+    use quote::quote;
+    use syn::{parse2, parse_quote, Path, Type};
+
+    #[derive(Debug, FromMeta)]
+    struct Keyword {
+        #[darling(rename = "type")]
+        ty: Type,
+        #[darling(rename = "fn")]
+        func: Path,
+    }
+
+    #[derive(Debug, FromMeta)]
+    struct FlattenKeyword {
+        #[darling(rename = "ref")]
+        reference: Type,
+        #[darling(flatten)]
+        keyword: Keyword,
+    }
+
+    #[derive(Debug, PartialEq, Eq, FromMeta)]
+    enum UnitEnumKeyword {
+        #[darling(rename = "enum")]
+        Enum,
+        #[darling(rename = "struct")]
+        Struct,
+        #[darling(rename = "trait")]
+        Trait,
+    }
+
+    #[derive(Debug, FromMeta)]
+    struct FlattenEnumKeyword {
+        #[darling(rename = "ref")]
+        reference: Type,
+        #[darling(flatten)]
+        keyword: UnitEnumKeyword,
+    }
+
+    #[test]
+    fn keywords() {
+        let meta = quote! {
+            outer(type = "u32", fn = foo)
+        };
+
+        let keyword = Keyword::from_meta(&parse2(meta).unwrap()).unwrap();
+        assert_eq!(keyword.ty, parse_quote!(u32));
+        assert_eq!(keyword.func, parse_quote!(foo));
+    }
+
+    #[test]
+    fn flatten_keywords() {
+        let meta = quote! {
+            outer(ref = "u32", type = "i32", fn = bar)
+        };
+
+        let keyword = FlattenKeyword::from_meta(&parse2(meta).unwrap()).unwrap();
+        assert_eq!(keyword.reference, parse_quote!(u32));
+        assert_eq!(keyword.keyword.ty, parse_quote!(i32));
+        assert_eq!(keyword.keyword.func, parse_quote!(bar));
+    }
+
+    #[test]
+    fn enum_keywords() {
+        let enum_ = quote! {
+            outer(enum)
+        };
+
+        let unit_enum = UnitEnumKeyword::from_meta(&parse2(enum_).unwrap()).unwrap();
+        assert_eq!(unit_enum, UnitEnumKeyword::Enum);
+
+        let struct_ = quote! {
+            outer(struct)
+        };
+        let unit_enum = UnitEnumKeyword::from_meta(&parse2(struct_).unwrap()).unwrap();
+        assert_eq!(unit_enum, UnitEnumKeyword::Struct);
+    }
+
+    #[test]
+    fn flatten_enum_keywords() {
+        let meta = quote! {
+            outer(ref = "u32", enum)
+        };
+
+        let keyword = FlattenEnumKeyword::from_meta(&parse2(meta).unwrap()).unwrap();
+        assert_eq!(keyword.reference, parse_quote!(u32));
+        assert_eq!(keyword.keyword, UnitEnumKeyword::Enum);
+
+        let meta = quote! {
+            outer(ref = "u32", struct)
+        };
+
+        let keyword = FlattenEnumKeyword::from_meta(&parse2(meta).unwrap()).unwrap();
+        assert_eq!(keyword.reference, parse_quote!(u32));
+        assert_eq!(keyword.keyword, UnitEnumKeyword::Struct);
     }
 }
 

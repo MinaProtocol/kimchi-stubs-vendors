@@ -10,11 +10,18 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 name = "rmp-serde"
-version = "1.2.0"
+version = "1.3.1"
 authors = ["Evgeny Safronov <division494@gmail.com>"]
-description = "Serde bindings for RMP"
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Serde support for MessagePack"
 documentation = "https://docs.rs/rmp-serde"
 readme = "README.md"
 keywords = [
@@ -26,25 +33,51 @@ keywords = [
 categories = ["encoding"]
 license = "MIT"
 repository = "https://github.com/3Hren/msgpack-rust"
+resolver = "2"
 
 [package.metadata.release]
 tag-prefix = "{{crate_name}}/"
 
-[dependencies.byteorder]
-version = "1.4.3"
+[badges.maintenance]
+status = "looking-for-maintainer"
+
+[lib]
+name = "rmp_serde"
+path = "src/lib.rs"
+
+[[test]]
+name = "decode"
+path = "tests/decode.rs"
+
+[[test]]
+name = "decode_derive"
+path = "tests/decode_derive.rs"
+
+[[test]]
+name = "encode"
+path = "tests/encode.rs"
+
+[[test]]
+name = "encode_derive"
+path = "tests/encode_derive.rs"
+
+[[test]]
+name = "round"
+path = "tests/round.rs"
+
+[[bench]]
+name = "buf"
+path = "benches/buf.rs"
 
 [dependencies.rmp]
-version = "0.8.13"
+version = "0.8.14"
 
 [dependencies.serde]
-version = "1.0.136"
+version = "1.0.228"
 
 [dev-dependencies.serde]
-version = "1.0.136"
+version = "1.0.228"
 features = ["derive"]
 
 [dev-dependencies.serde_bytes]
-version = "0.11.5"
-
-[badges.maintenance]
-status = "looking-for-maintainer"
+version = "0.11.19"

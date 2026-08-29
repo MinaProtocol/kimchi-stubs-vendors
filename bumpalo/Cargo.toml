@@ -13,7 +13,7 @@
 edition = "2021"
 rust-version = "1.71.1"
 name = "bumpalo"
-version = "3.17.0"
+version = "3.20.3"
 authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
 build = false
 exclude = [
@@ -31,6 +31,11 @@ autobenches = false
 description = "A fast bump allocation arena for Rust."
 documentation = "https://docs.rs/bumpalo"
 readme = "README.md"
+keywords = [
+    "arena",
+    "bump",
+    "allocator",
+]
 categories = [
     "memory-management",
     "rust-patterns",
@@ -41,6 +46,18 @@ repository = "https://github.com/fitzgen/bumpalo"
 
 [package.metadata.docs.rs]
 all-features = true
+
+[features]
+allocator_api = []
+bench_allocator_api = [
+    "allocator_api",
+    "blink-alloc/nightly",
+]
+boxed = []
+collections = []
+default = []
+serde = ["dep:serde"]
+std = []
 
 [lib]
 name = "bumpalo"
@@ -56,14 +73,23 @@ default-features = false
 version = "1.0.171"
 optional = true
 
+[dev-dependencies.blink-alloc]
+version = "=0.4.0"
+
 [dev-dependencies.criterion]
 version = "0.3.6"
 
 [dev-dependencies.quickcheck]
-version = "1.0.3"
+version = "=1.0.3"
 
 [dev-dependencies.rand]
 version = "0.8.5"
+
+[dev-dependencies.rayon]
+version = "=1.10.0"
+
+[dev-dependencies.rayon-core]
+version = "=1.12.1"
 
 [dev-dependencies.serde]
 version = "1.0.197"
@@ -71,11 +97,3 @@ features = ["derive"]
 
 [dev-dependencies.serde_json]
 version = "1.0.115"
-
-[features]
-allocator_api = []
-boxed = []
-collections = []
-default = []
-serde = ["dep:serde"]
-std = []

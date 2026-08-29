@@ -1,3 +1,64 @@
+## 1.3.0
+
+- Added ability to hook into Rust panics using `rust_panic_hook` callback from OCaml by @zshipko in https://github.com/zshipko/ocaml-rs/pull/165
+
+## 1.2.1
+
+- fix `dune utop` with `no-caml-startup` feature, update ci for ocaml 5.3.0, clippy by @zshipko in https://github.com/zshipko/ocaml-rs/pull/163
+
+## 1.2.0
+
+- Improve panic handler registration and update ocaml-boxroot-sys to 0.4.0 https://github.com/zshipko/ocaml-rs/pull/160
+
+## 1.1.0
+
+- Support Caml_state definition as a macro by @Lupus in https://github.com/zshipko/ocaml-rs/pull/157
+
+## 1.0.0
+
+- Minor improvements https://github.com/zshipko/ocaml-rs/pull/154
+- Fortran bigarray layout by @crackcomm https://github.com/zshipko/ocaml-rs/pull/145
+- Fix conversion of `Vec<f32>` by @gridbugs https://github.com/zshipko/ocaml-rs/pull/144
+
+## 1.0.0-beta.5
+
+- Implement `ToValue` for `Box<T>` by @fmckeogh https://github.com/zshipko/ocaml-rs/pull/107
+- Refactor derive macros for `FromValue` and `ToValue`
+- Drop support for OCaml 4.07
+
+## 1.0.0-beta.4
+
+- Added `ocaml::function` macro for calling OCaml values
+- Fix spelling in book by @fmckeogh in https://github.com/zshipko/ocaml-rs/pull/98
+- Fixes no_std by @fmckeogh in https://github.com/zshipko/ocaml-rs/pull/99
+- Feature gate panic hook by @fmckeogh in https://github.com/zshipko/ocaml-rs/pull/100
+- Test `no_std` feature in CI by @fmckeogh in https://github.com/zshipko/ocaml-rs/pull/101
+- Implement `FromValue` for `Box<T>` by @fmckeogh in https://github.com/zshipko/ocaml-rs/pull/105
+
+## 1.0.0-beta.2
+
+- Added `Seq` type
+
+## 1.0.0-beta.1
+
+- Add `ToValue`/`FromValue` implementations for `u32`
+
+## 1.0.0-beta.0
+
+- Removed `IntoValue` and added `ToValue` because it now accepts a reference to self
+- `Custom` types now have to be wrapped in a `Pointer<T>`
+- Added `ocaml::import!` macro for calling OCaml functions from Rust
+- Added `ocaml::sig` proc-macro for generating `external` and type signatures
+- Added ocaml-build crate for generating OCaml code from `ocaml::sig` macros and linking dune
+  projects
+- Renamed `Value::call` to `Value::call1` and rewrote `Value::call` to take a variable number of
+  arguments
+- Added support for automatic conversion between OCaml `Result.t` and Rust `Result`
+- Renamed `Value::float` to `Value::double` and `Value::float_val` to `Value::double_val`
+- Added `Value::alloc_double_array`, `Value::double_field` and `Value::store_double_field`
+- Improved support for float arrays in ocaml-sys
+- `Custom` values have a new default `finalize` implementation that will drop the inner Rust value
+
 ## 0.22.4
 
 - Added `Value::exn_to_string` to convert OCaml exception values to their string representation

@@ -5,7 +5,9 @@
 )]
 
 #[macro_use]
-mod macros;
+mod snapshot;
+
+mod debug;
 
 use proc_macro2::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 use quote::quote;
@@ -131,6 +133,7 @@ fn test_inherited_vis_named_field() {
                 named: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ident: Some("f"),
                         colon_token: Some,
                         ty: Type::Tuple,
@@ -168,6 +171,7 @@ fn test_inherited_vis_unnamed_field() {
                 unnamed: [
                     Field {
                         vis: Visibility::Inherited,
+                        modifiers: FieldModifiers,
                         ty: Type::Group {
                             elem: Type::Path {
                                 path: Path {

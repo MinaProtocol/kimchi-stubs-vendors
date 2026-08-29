@@ -1,5 +1,5 @@
 /// Create an [`IndexMap`][crate::IndexMap] from a list of key-value pairs
-/// and a `BuildHasherDefault`-wrapped custom hasher.
+/// and a [`BuildHasherDefault`][core::hash::BuildHasherDefault]-wrapped custom hasher.
 ///
 /// ## Example
 ///
@@ -23,7 +23,7 @@
 macro_rules! indexmap_with_default {
     ($H:ty; $($key:expr => $value:expr,)+) => { $crate::indexmap_with_default!($H; $($key => $value),+) };
     ($H:ty; $($key:expr => $value:expr),*) => {{
-        let builder = ::core::hash::BuildHasherDefault::<$H>::default();
+        let builder = ::core::hash::BuildHasherDefault::<$H>::new();
         const CAP: usize = <[()]>::len(&[$({ stringify!($key); }),*]);
         #[allow(unused_mut)]
         // Specify your custom `H` (must implement Default + Hasher) as the hasher:
@@ -73,7 +73,7 @@ macro_rules! indexmap {
 }
 
 /// Create an [`IndexSet`][crate::IndexSet] from a list of values
-/// and a `BuildHasherDefault`-wrapped custom hasher.
+/// and a [`BuildHasherDefault`][core::hash::BuildHasherDefault]-wrapped custom hasher.
 ///
 /// ## Example
 ///
@@ -97,7 +97,7 @@ macro_rules! indexmap {
 macro_rules! indexset_with_default {
     ($H:ty; $($value:expr,)+) => { $crate::indexset_with_default!($H; $($value),+) };
     ($H:ty; $($value:expr),*) => {{
-        let builder = ::core::hash::BuildHasherDefault::<$H>::default();
+        let builder = ::core::hash::BuildHasherDefault::<$H>::new();
         const CAP: usize = <[()]>::len(&[$({ stringify!($value); }),*]);
         #[allow(unused_mut)]
         // Specify your custom `H` (must implement Default + Hash) as the hasher:

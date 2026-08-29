@@ -43,7 +43,7 @@ struct MarkerWriteError<E: RmpWriteErr>(E);
 impl<E: RmpWriteErr> From<E> for MarkerWriteError<E> {
     #[cold]
     fn from(err: E) -> Self {
-        MarkerWriteError(err)
+        Self(err)
     }
 }
 
@@ -59,8 +59,8 @@ pub struct DataWriteError<E: RmpWriteErr>(E);
 impl<E: RmpWriteErr> From<E> for DataWriteError<E> {
     #[cold]
     #[inline]
-    fn from(err: E) -> DataWriteError<E> {
-        DataWriteError(err)
+    fn from(err: E) -> Self {
+        Self(err)
     }
 }
 
@@ -119,12 +119,7 @@ macro_rules! write_byteorder_utils {
             #[inline]
             #[doc(hidden)]
             fn $name(&mut self, val: $tp) -> Result<(), DataWriteError<Self::Error>> where Self: Sized {
-                const SIZE: usize = core::mem::size_of::<$tp>();
-                let mut buf: [u8; SIZE] = [0u8; SIZE];
-                paste::paste! {
-                    <byteorder::BigEndian as byteorder::ByteOrder>::[<write_ $tp>](&mut buf, val);
-                }
-                self.write_bytes(&buf).map_err(DataWriteError)
+                self.write_bytes(&val.to_be_bytes()).map_err(DataWriteError)
             }
         )*
     };
@@ -134,8 +129,6 @@ macro_rules! write_byteorder_utils {
 ///
 /// The methods of this trait should be considered an implementation detail (for now).
 /// It is currently sealed (can not be implemented by the user).
-///
-/// See also [`std::io::Write`] and [`byteorder::WriteBytesExt`]
 ///
 /// Its primary implementations are [`std::io::Write`] and [`ByteBuf`].
 pub trait RmpWrite: sealed::Sealed {
@@ -205,7 +198,7 @@ impl<E: RmpWriteErr> From<MarkerWriteError<E>> for ValueWriteError<E> {
     #[cold]
     fn from(err: MarkerWriteError<E>) -> Self {
         match err {
-            MarkerWriteError(err) => ValueWriteError::InvalidMarkerWrite(err),
+            MarkerWriteError(err) => Self::InvalidMarkerWrite(err),
         }
     }
 }
@@ -214,15 +207,15 @@ impl<E: RmpWriteErr> From<DataWriteError<E>> for ValueWriteError<E> {
     #[cold]
     fn from(err: DataWriteError<E>) -> Self {
         match err {
-            DataWriteError(err) => ValueWriteError::InvalidDataWrite(err),
+            DataWriteError(err) => Self::InvalidDataWrite(err),
         }
     }
 }
 
 #[cfg(feature = "std")] // Backwards compatbility ;)
-impl From<ValueWriteError<std::io::Error>> for std::io::Error {
+impl From<ValueWriteError<Self>> for std::io::Error {
     #[cold]
-    fn from(err: ValueWriteError<std::io::Error>) -> std::io::Error {
+    fn from(err: ValueWriteError<Self>) -> Self {
         match err {
             ValueWriteError::InvalidMarkerWrite(err) |
             ValueWriteError::InvalidDataWrite(err) => err,
@@ -235,8 +228,8 @@ impl<E: RmpWriteErr> error::Error for ValueWriteError<E> {
     #[cold]
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match *self {
-            ValueWriteError::InvalidMarkerWrite(ref err) |
-            ValueWriteError::InvalidDataWrite(ref err) => Some(err),
+            Self::InvalidMarkerWrite(ref err) |
+            Self::InvalidDataWrite(ref err) => Some(err),
         }
     }
 }
@@ -258,7 +251,7 @@ impl<E: RmpWriteErr> Display for ValueWriteError<E> {
 pub fn write_array_len<W: RmpWrite>(wr: &mut W, len: u32) -> Result<Marker, ValueWriteError<W::Error>> {
     let marker = if len < 16 {
         Marker::FixArray(len as u8)
-    } else if len <= u16::MAX as u32 {
+    } else if u16::try_from(len).is_ok() {
         Marker::Array16
     } else {
         Marker::Array32
@@ -283,7 +276,7 @@ pub fn write_array_len<W: RmpWrite>(wr: &mut W, len: u32) -> Result<Marker, Valu
 pub fn write_map_len<W: RmpWrite>(wr: &mut W, len: u32) -> Result<Marker, ValueWriteError<W::Error>> {
     let marker = if len < 16 {
         Marker::FixMap(len as u8)
-    } else if len <= u16::MAX as u32 {
+    } else if u16::try_from(len).is_ok() {
         Marker::Map16
     } else {
         Marker::Map32

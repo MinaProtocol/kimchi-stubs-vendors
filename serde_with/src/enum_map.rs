@@ -131,7 +131,7 @@ use crate::{
 /// // into this XML document
 /// // Duplicate keys are emitted for identical enum variants.
 /// let expected = r#"
-/// <?xml version="1.0" encoding="UTF-8"?>
+/// <?xml version="1.0" encoding="utf-8"?>
 /// <VecEnumValues>
 ///     <vec>
 ///         <Int>123</Int>
@@ -229,10 +229,6 @@ where
     type SerializeMap = Impossible<S::Ok, S::Error>;
     type SerializeStruct = Impossible<S::Ok, S::Error>;
     type SerializeStructVariant = Impossible<S::Ok, S::Error>;
-
-    fn is_human_readable(&self) -> bool {
-        self.0.is_human_readable()
-    }
 
     fn serialize_bool(self, _v: bool) -> Result<Self::Ok, Self::Error> {
         Err(SerError::custom("wrong type for EnumMap"))
@@ -403,6 +399,10 @@ where
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
         Err(SerError::custom("wrong type for EnumMap"))
     }
+
+    fn is_human_readable(&self) -> bool {
+        self.0.is_human_readable()
+    }
 }
 
 /// Serialize a single element but turn the sequence into a map logic.
@@ -457,10 +457,6 @@ where
     type SerializeMap = Impossible<Self::Ok, Self::Error>;
     type SerializeStruct = Impossible<Self::Ok, Self::Error>;
     type SerializeStructVariant = SerializeVariant<'a, M>;
-
-    fn is_human_readable(&self) -> bool {
-        self.is_human_readable
-    }
 
     fn serialize_bool(self, _v: bool) -> Result<Self::Ok, Self::Error> {
         Err(SerError::custom("wrong type for EnumMap"))
@@ -607,7 +603,7 @@ where
             delegate: self.delegate,
             is_human_readable: self.is_human_readable,
             variant,
-            content: Content::TupleStruct(name, Vec::with_capacity(len)),
+            content: Content::TupleStruct(name, utils::vec_with_capacity_cautious(Some(len))),
         })
     }
 
@@ -634,8 +630,12 @@ where
             delegate: self.delegate,
             is_human_readable: self.is_human_readable,
             variant,
-            content: Content::Struct(name, Vec::with_capacity(len)),
+            content: Content::Struct(name, utils::vec_with_capacity_cautious(Some(len))),
         })
+    }
+
+    fn is_human_readable(&self) -> bool {
+        self.is_human_readable
     }
 }
 
@@ -715,8 +715,11 @@ where
 {
     type Error = M::Error;
 
-    fn is_human_readable(&self) -> bool {
-        self.is_human_readable
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.deserialize_seq(visitor)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -726,14 +729,11 @@ where
         visitor.visit_seq(self)
     }
 
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_seq(visitor)
+    fn is_human_readable(&self) -> bool {
+        self.is_human_readable
     }
 
-    serde::forward_to_deserialize_any! {
+    forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         bytes byte_buf option unit unit_struct newtype_struct tuple
         tuple_struct map struct enum identifier ignored_any
@@ -792,10 +792,6 @@ where
 {
     type Error = M::Error;
 
-    fn is_human_readable(&self) -> bool {
-        self.is_human_readable
-    }
-
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -815,7 +811,11 @@ where
         visitor.visit_enum(self)
     }
 
-    serde::forward_to_deserialize_any! {
+    fn is_human_readable(&self) -> bool {
+        self.is_human_readable
+    }
+
+    forward_to_deserialize_any! {
         bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
         bytes byte_buf option unit unit_struct newtype_struct seq tuple
         tuple_struct map struct identifier ignored_any

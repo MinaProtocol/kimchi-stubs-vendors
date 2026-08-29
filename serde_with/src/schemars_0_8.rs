@@ -17,10 +17,6 @@ use ::schemars_0_8::{
     },
     JsonSchema,
 };
-use core::{
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
-};
 
 //===================================================================
 // Trait Definition
@@ -142,6 +138,10 @@ where
     T: ?Sized,
     TA: JsonSchemaAs<T>,
 {
+    fn is_referenceable() -> bool {
+        TA::is_referenceable()
+    }
+
     fn schema_name() -> String {
         TA::schema_name()
     }
@@ -152,10 +152,6 @@ where
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
         TA::json_schema(gen)
-    }
-
-    fn is_referenceable() -> bool {
-        TA::is_referenceable()
     }
 }
 
@@ -276,10 +272,50 @@ where
     forward_schema!(HashSet<WrapSchema<T, TA>, S>);
 }
 
+impl<T, TA> JsonSchemaAs<Bound<T>> for Bound<TA>
+where
+    TA: JsonSchemaAs<T>,
+{
+    forward_schema!(Bound<WrapSchema<T, TA>>);
+}
+
+impl<T, TA> JsonSchemaAs<Range<T>> for Range<TA>
+where
+    TA: JsonSchemaAs<T>,
+{
+    forward_schema!(Range<WrapSchema<T, TA>>);
+}
+
+// Note: Not included in `schemars`
+// impl<T, TA> JsonSchemaAs<RangeFrom<T>> for RangeFrom<TA>
+// where
+//     TA: JsonSchemaAs<T>,
+// {
+//     forward_schema!(RangeFrom<WrapSchema<T, TA>>);
+// }
+
+// impl<T, TA> JsonSchemaAs<RangeTo<T>> for RangeTo<TA>
+// where
+//     TA: JsonSchemaAs<T>,
+// {
+//     forward_schema!(RangeTo<WrapSchema<T, TA>>);
+// }
+
+impl<T, TA> JsonSchemaAs<RangeInclusive<T>> for RangeInclusive<TA>
+where
+    TA: JsonSchemaAs<T>,
+{
+    forward_schema!(RangeInclusive<WrapSchema<T, TA>>);
+}
+
 impl<T, TA, const N: usize> JsonSchemaAs<[T; N]> for [TA; N]
 where
     TA: JsonSchemaAs<T>,
 {
+    fn is_referenceable() -> bool {
+        false
+    }
+
     fn schema_name() -> String {
         std::format!("[{}; {}]", <WrapSchema<T, TA>>::schema_name(), N)
     }
@@ -305,10 +341,6 @@ where
             ..Default::default()
         }
         .into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
     }
 }
 
@@ -372,7 +404,89 @@ impl<T> JsonSchemaAs<T> for DisplayFromStr {
     forward_schema!(String);
 }
 
+#[cfg(feature = "base58")]
+impl<T, A: base58::Alphabet> JsonSchemaAs<T> for base58::Base58<A> {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "Base58<A>".into()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        "serde_with::base58::Base58<A>".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            // no regex pattern here, since it varies depending on the alphabet
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+#[cfg(feature = "base64")]
+impl<T, A: base64::Alphabet, F: Format> JsonSchemaAs<T> for base64::Base64<A, F> {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "Base64<A, F>".into()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        "serde_with::base64::Base64<A, F>".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            // See <https://json-schema.org/draft/2020-12/draft-bhutton-json-schema-validation-00#rfc.section.8.3>
+            extensions: [("contentEncoding".to_string(), serde_json::json!("base64"))].into(),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+#[cfg(feature = "hex")]
+impl<T, F: Format> JsonSchemaAs<T> for hex::Hex<F> {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "Hex<F>".into()
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        "serde_with::hex::Hex<F>".into()
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        use ::schemars_0_8::schema::StringValidation;
+
+        SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            string: Some(Box::new(StringValidation {
+                pattern: Some(r"^(?:[0-9A-Fa-f]{2})*$".to_owned()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 impl JsonSchemaAs<bool> for BoolFromInt<Strict> {
+    fn is_referenceable() -> bool {
+        false
+    }
+
     fn schema_name() -> String {
         "BoolFromInt<Strict>".into()
     }
@@ -393,13 +507,13 @@ impl JsonSchemaAs<bool> for BoolFromInt<Strict> {
         }
         .into()
     }
-
-    fn is_referenceable() -> bool {
-        false
-    }
 }
 
 impl JsonSchemaAs<bool> for BoolFromInt<Flexible> {
+    fn is_referenceable() -> bool {
+        false
+    }
+
     fn schema_name() -> String {
         "BoolFromInt<Flexible>".into()
     }
@@ -414,10 +528,6 @@ impl JsonSchemaAs<bool> for BoolFromInt<Flexible> {
             ..Default::default()
         }
         .into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
     }
 }
 
@@ -434,6 +544,10 @@ impl<T> JsonSchemaAs<T> for Bytes {
 }
 
 impl JsonSchemaAs<Vec<u8>> for BytesOrString {
+    fn is_referenceable() -> bool {
+        false
+    }
+
     fn schema_name() -> String {
         "BytesOrString".into()
     }
@@ -442,11 +556,11 @@ impl JsonSchemaAs<Vec<u8>> for BytesOrString {
         "serde_with::BytesOrString".into()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         SchemaObject {
             subschemas: Some(Box::new(SubschemaValidation {
                 any_of: Some(std::vec![
-                    gen.subschema_for::<Vec<u8>>(),
+                    generator.subschema_for::<Vec<u8>>(),
                     SchemaObject {
                         instance_type: Some(InstanceType::String.into()),
                         metadata: Some(Box::new(Metadata {
@@ -462,10 +576,6 @@ impl JsonSchemaAs<Vec<u8>> for BytesOrString {
             ..Default::default()
         }
         .into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
     }
 }
 
@@ -538,6 +648,10 @@ impl<T> JsonSchemaAs<Vec<T>> for EnumMap
 where
     T: JsonSchema,
 {
+    fn is_referenceable() -> bool {
+        true
+    }
+
     fn schema_name() -> String {
         std::format!("EnumMap({})", T::schema_name())
     }
@@ -571,16 +685,12 @@ where
         let properties = &mut object.object().properties;
         for schema in one_of {
             if let Some(object) = schema.into_object().object {
-                properties.extend(object.properties.into_iter());
+                properties.extend(object.properties);
             }
         }
 
         object.object().additional_properties = Some(Box::new(Schema::Bool(false)));
         object.into()
-    }
-
-    fn is_referenceable() -> bool {
-        true
     }
 }
 
@@ -607,13 +717,13 @@ where
     ///
     /// Unfortunately for us, we need to handle all of these options by recursing
     /// into the subschemas and applying the same transformations as above.
-    fn kvmap_transform_schema(gen: &mut SchemaGenerator, schema: &mut Schema) {
+    fn kvmap_transform_schema_0_8(gen: &mut SchemaGenerator, schema: &mut Schema) {
         let mut parents = Vec::new();
 
-        Self::kvmap_transform_schema_impl(gen, schema, &mut parents, 0);
+        Self::kvmap_transform_schema_impl_0_8(gen, schema, &mut parents, 0);
     }
 
-    fn kvmap_transform_schema_impl(
+    fn kvmap_transform_schema_impl_0_8(
         gen: &mut SchemaGenerator,
         schema: &mut Schema,
         parents: &mut Vec<String>,
@@ -652,9 +762,9 @@ where
             };
 
             parents.push(name);
-            DropGuard::new(parents, |parents| drop(parents.pop()))
+            utils::DropGuard::new(parents, |parents| drop(parents.pop()))
         } else {
-            DropGuard::unguarded(parents)
+            utils::DropGuard::unguarded(parents)
         };
 
         if let Some(object) = &mut schema.object {
@@ -668,7 +778,7 @@ where
                 *max = max.saturating_sub(1);
             }
 
-            if let Some(min) = &mut object.max_properties {
+            if let Some(min) = &mut object.min_properties {
                 *min = min.saturating_sub(1);
             }
         }
@@ -707,19 +817,19 @@ where
 
         if let Some(one_of) = &mut subschemas.one_of {
             for subschema in one_of {
-                Self::kvmap_transform_schema_impl(gen, subschema, &mut parents, depth + 1);
+                Self::kvmap_transform_schema_impl_0_8(gen, subschema, &mut parents, depth + 1);
             }
         }
 
         if let Some(any_of) = &mut subschemas.any_of {
             for subschema in any_of {
-                Self::kvmap_transform_schema_impl(gen, subschema, &mut parents, depth + 1);
+                Self::kvmap_transform_schema_impl_0_8(gen, subschema, &mut parents, depth + 1);
             }
         }
 
         if let Some(all_of) = &mut subschemas.all_of {
             for subschema in all_of {
-                Self::kvmap_transform_schema_impl(gen, subschema, &mut parents, depth + 1);
+                Self::kvmap_transform_schema_impl_0_8(gen, subschema, &mut parents, depth + 1);
             }
         }
     }
@@ -729,6 +839,10 @@ impl<T, TA> JsonSchemaAs<Vec<T>> for KeyValueMap<TA>
 where
     TA: JsonSchemaAs<T>,
 {
+    fn is_referenceable() -> bool {
+        true
+    }
+
     fn schema_name() -> String {
         std::format!("KeyValueMap({})", <WrapSchema<T, TA>>::schema_name())
     }
@@ -743,7 +857,7 @@ where
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
         let mut value = <WrapSchema<T, TA>>::json_schema(gen);
-        <WrapSchema<Vec<T>, KeyValueMap<TA>>>::kvmap_transform_schema(gen, &mut value);
+        <WrapSchema<Vec<T>, KeyValueMap<TA>>>::kvmap_transform_schema_0_8(gen, &mut value);
 
         SchemaObject {
             instance_type: Some(InstanceType::Object.into()),
@@ -754,10 +868,6 @@ where
             ..Default::default()
         }
         .into()
-    }
-
-    fn is_referenceable() -> bool {
-        true
     }
 }
 
@@ -792,6 +902,10 @@ map_first_last_wins_schema!(=> S HashMap<K, V, S>);
 map_first_last_wins_schema!(=> S hashbrown_0_14::HashMap<K, V, S>);
 #[cfg(feature = "hashbrown_0_15")]
 map_first_last_wins_schema!(=> S hashbrown_0_15::HashMap<K, V, S>);
+#[cfg(feature = "hashbrown_0_16")]
+map_first_last_wins_schema!(=> S hashbrown_0_16::HashMap<K, V, S>);
+#[cfg(feature = "hashbrown_0_17")]
+map_first_last_wins_schema!(=> S hashbrown_0_17::HashMap<K, V, S>);
 #[cfg(feature = "indexmap_1")]
 map_first_last_wins_schema!(=> S indexmap_1::IndexMap<K, V, S>);
 #[cfg(feature = "indexmap_2")]
@@ -919,12 +1033,12 @@ macro_rules! schema_for_pickfirst {
                 .into()
             }
 
-            fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+            fn json_schema(g: &mut SchemaGenerator) -> Schema {
                 let mut first = true;
                 let subschemas = std::vec![$(
                     {
                         let is_first = std::mem::replace(&mut first, false);
-                        let schema = gen.subschema_for::<WrapSchema<T, $param>>();
+                        let schema = g.subschema_for::<WrapSchema<T, $param>>();
 
                         if !is_first {
                             SchemaObject {
@@ -963,49 +1077,69 @@ schema_for_pickfirst!(A B);
 schema_for_pickfirst!(A B C);
 schema_for_pickfirst!(A B C D);
 
-impl<T, TA> JsonSchemaAs<T> for SetLastValueWins<TA>
-where
-    TA: JsonSchemaAs<T>,
-{
-    fn schema_id() -> Cow<'static, str> {
-        std::format!(
-            "serde_with::SetLastValueWins<{}>",
-            <WrapSchema<T, TA> as JsonSchema>::schema_id()
-        )
-        .into()
-    }
+macro_rules! map_first_last_wins_schema {
+    ($(=> $extra:ident)? $type:ty) => {
+        impl<V, $($extra,)? VA> JsonSchemaAs<$type> for SetLastValueWins<VA>
+        where
+            VA: JsonSchemaAs<V>,
+        {
+            fn schema_id() -> Cow<'static, str> {
+                std::format!(
+                    "serde_with::SetLastValueWins<{}>",
+                    <WrapSchema<V, VA> as JsonSchema>::schema_id()
+                )
+                .into()
+            }
 
-    fn schema_name() -> String {
-        std::format!(
-            "SetLastValueWins<{}>",
-            <WrapSchema<T, TA> as JsonSchema>::schema_name()
-        )
-    }
+            fn schema_name() -> String {
+                std::format!(
+                    "SetLastValueWins<{}>",
+                    <WrapSchema<V, VA> as JsonSchema>::schema_name()
+                )
+            }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let schema = <WrapSchema<T, TA> as JsonSchema>::json_schema(gen);
-        let mut schema = schema.into_object();
+            fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+                let schema = <BTreeSet<WrapSchema<V, VA>> as JsonSchema>::json_schema(gen);
+                let mut schema = schema.into_object();
 
-        // We explicitly allow duplicate items since the whole point of
-        // SetLastValueWins is to take the duplicate value.
-        if let Some(array) = &mut schema.array {
-            array.unique_items = None;
+                // We explicitly allow duplicate items since the whole point of
+                // SetLastValueWins is to take the duplicate value.
+                if let Some(array) = &mut schema.array {
+                    array.unique_items = None;
+                }
+
+                schema.into()
+            }
+
+            fn is_referenceable() -> bool {
+                false
+            }
         }
 
-        schema.into()
-    }
-
-    fn is_referenceable() -> bool {
-        false
+        impl<V, $($extra,)? VA> JsonSchemaAs<$type> for SetPreventDuplicates<VA>
+        where
+            VA: JsonSchemaAs<V>,
+        {
+            forward_schema!(BTreeSet<WrapSchema<V, VA>>);
+        }
     }
 }
 
-impl<T, TA> JsonSchemaAs<T> for SetPreventDuplicates<TA>
-where
-    TA: JsonSchemaAs<T>,
-{
-    forward_schema!(WrapSchema<T, TA>);
-}
+map_first_last_wins_schema!(BTreeSet<V>);
+#[cfg(feature = "std")]
+map_first_last_wins_schema!(=> S HashSet<V, S>);
+#[cfg(feature = "hashbrown_0_14")]
+map_first_last_wins_schema!(=> S hashbrown_0_14::HashSet<V, S>);
+#[cfg(feature = "hashbrown_0_15")]
+map_first_last_wins_schema!(=> S hashbrown_0_15::HashSet<V, S>);
+#[cfg(feature = "hashbrown_0_16")]
+map_first_last_wins_schema!(=> S hashbrown_0_16::HashSet<V, S>);
+#[cfg(feature = "hashbrown_0_17")]
+map_first_last_wins_schema!(=> S hashbrown_0_17::HashSet<V, S>);
+#[cfg(feature = "indexmap_1")]
+map_first_last_wins_schema!(=> S indexmap_1::IndexSet<V, S>);
+#[cfg(feature = "indexmap_2")]
+map_first_last_wins_schema!(=> S indexmap_2::IndexSet<V, S>);
 
 impl<SEP, T, TA> JsonSchemaAs<T> for StringWithSeparator<SEP, TA>
 where
@@ -1027,18 +1161,11 @@ mod timespan {
     // #[non_exhaustive] is not actually necessary here but it should
     // help avoid warnings about semver breakage if this ever changes.
     #[non_exhaustive]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub enum TimespanTargetType {
         String,
         F64,
         U64,
         I64,
-    }
-
-    impl TimespanTargetType {
-        pub const fn is_signed(self) -> bool {
-            !matches!(self, Self::U64)
-        }
     }
 
     /// Internal helper trait used to constrain which types we implement
@@ -1107,6 +1234,15 @@ mod timespan {
     #[cfg(feature = "chrono_0_4")]
     declare_timespan_target!(::chrono_0_4::NaiveDateTime { i64, f64, String });
 
+    #[cfg(feature = "jiff_0_2")]
+    declare_timespan_target!(::jiff_0_2::SignedDuration { i64, f64, String });
+    #[cfg(feature = "jiff_0_2")]
+    declare_timespan_target!(::jiff_0_2::Timestamp { i64, f64, String });
+    #[cfg(feature = "jiff_0_2")]
+    declare_timespan_target!(::jiff_0_2::Zoned { i64, f64, String });
+    #[cfg(feature = "jiff_0_2")]
+    declare_timespan_target!(::jiff_0_2::civil::DateTime { i64, f64, String });
+
     #[cfg(feature = "time_0_3")]
     declare_timespan_target!(::time_0_3::Duration { i64, f64, String });
     #[cfg(feature = "time_0_3")]
@@ -1132,7 +1268,7 @@ where
 }
 
 impl TimespanTargetType {
-    pub(crate) fn to_flexible_schema(self, signed: bool) -> Schema {
+    pub(crate) fn into_flexible_schema(self, signed: bool) -> Schema {
         use ::schemars_0_8::schema::StringValidation;
 
         let mut number = SchemaObject {
@@ -1162,7 +1298,7 @@ impl TimespanTargetType {
             ..Default::default()
         };
 
-        if self == Self::String {
+        if matches!(self, Self::String) {
             number.metadata().write_only = true;
         } else {
             string.metadata().write_only = true;
@@ -1193,6 +1329,10 @@ where
     T: TimespanSchemaTarget<F>,
     F: Format + JsonSchema,
 {
+    fn is_referenceable() -> bool {
+        false
+    }
+
     fn schema_name() -> String {
         <T as TimespanSchemaTarget<F>>::TYPE
             .schema_id()
@@ -1207,11 +1347,7 @@ where
 
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         <T as TimespanSchemaTarget<F>>::TYPE
-            .to_flexible_schema(<T as TimespanSchemaTarget<F>>::SIGNED)
-    }
-
-    fn is_referenceable() -> bool {
-        false
+            .into_flexible_schema(<T as TimespanSchemaTarget<F>>::SIGNED)
     }
 }
 
@@ -1255,51 +1391,32 @@ forward_duration_schema!(TimestampMilliSecondsWithFrac);
 forward_duration_schema!(TimestampMicroSecondsWithFrac);
 forward_duration_schema!(TimestampNanoSecondsWithFrac);
 
-//===================================================================
-// Extra internal helper structs
-
-struct DropGuard<T, F: FnOnce(T)> {
-    value: ManuallyDrop<T>,
-    guard: Option<F>,
+#[cfg(feature = "json")]
+impl<T> JsonSchemaAs<T> for json::JsonString {
+    forward_schema!(String);
 }
 
-impl<T, F: FnOnce(T)> DropGuard<T, F> {
-    pub fn new(value: T, guard: F) -> Self {
-        Self {
-            value: ManuallyDrop::new(value),
-            guard: Some(guard),
-        }
-    }
-
-    pub fn unguarded(value: T) -> Self {
-        Self {
-            value: ManuallyDrop::new(value),
-            guard: None,
-        }
-    }
+macro_rules! none_as_zero {
+    ($($nonzero:ident => $primitive:ident),* $(,)?) => {
+        $(
+            impl JsonSchemaAs<Option<core::num::$nonzero>> for NoneAsZero {
+                forward_schema!($primitive);
+            }
+        )*
+    };
 }
 
-impl<T, F: FnOnce(T)> Deref for DropGuard<T, F> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
-}
-
-impl<T, F: FnOnce(T)> DerefMut for DropGuard<T, F> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
-}
-
-impl<T, F: FnOnce(T)> Drop for DropGuard<T, F> {
-    fn drop(&mut self) {
-        // SAFETY: value is known to be initialized since we only ever remove it here.
-        let value = unsafe { ManuallyDrop::take(&mut self.value) };
-
-        if let Some(guard) = self.guard.take() {
-            guard(value);
-        }
-    }
+none_as_zero! {
+    NonZeroU8    => u8,
+    NonZeroU16   => u16,
+    NonZeroU32   => u32,
+    NonZeroU64   => u64,
+    NonZeroU128  => u128,
+    NonZeroUsize => usize,
+    NonZeroI8    => i8,
+    NonZeroI16   => i16,
+    NonZeroI32   => i32,
+    NonZeroI64   => i64,
+    NonZeroI128  => i128,
+    NonZeroIsize => isize,
 }

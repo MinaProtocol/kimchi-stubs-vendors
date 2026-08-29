@@ -5,7 +5,9 @@
 )]
 
 #[macro_use]
-mod macros;
+mod snapshot;
+
+mod debug;
 
 use proc_macro2::{Delimiter, Group, Ident, Punct, Spacing, Span, TokenStream, TokenTree};
 use quote::{quote, ToTokens as _};
@@ -236,6 +238,7 @@ fn test_trait_object() {
                         }),
                     ],
                 }),
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -269,6 +272,7 @@ fn test_trait_object() {
             },
             Token![+],
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -294,6 +298,7 @@ fn test_trailing_plus() {
     Type::ImplTrait {
         bounds: [
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -314,6 +319,7 @@ fn test_trailing_plus() {
         dyn_token: Some,
         bounds: [
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -333,6 +339,7 @@ fn test_trailing_plus() {
     Type::TraitObject {
         bounds: [
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -350,6 +357,7 @@ fn test_trailing_plus() {
 #[test]
 fn test_tuple_comma() {
     let mut expr = TypeTuple {
+        attrs: Vec::new(),
         paren_token: token::Paren::default(),
         elems: Punctuated::new(),
     };
@@ -357,27 +365,27 @@ fn test_tuple_comma() {
 
     expr.elems.push_value(parse_quote!(_));
     // Must not parse to Type::Paren
-    snapshot!(expr.to_token_stream() as Type, @r#"
+    snapshot!(expr.to_token_stream() as Type, @"
     Type::Tuple {
         elems: [
             Type::Infer,
             Token![,],
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_punct(<Token![,]>::default());
-    snapshot!(expr.to_token_stream() as Type, @r#"
+    snapshot!(expr.to_token_stream() as Type, @"
     Type::Tuple {
         elems: [
             Type::Infer,
             Token![,],
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_value(parse_quote!(_));
-    snapshot!(expr.to_token_stream() as Type, @r#"
+    snapshot!(expr.to_token_stream() as Type, @"
     Type::Tuple {
         elems: [
             Type::Infer,
@@ -385,10 +393,10 @@ fn test_tuple_comma() {
             Type::Infer,
         ],
     }
-    "#);
+    ");
 
     expr.elems.push_punct(<Token![,]>::default());
-    snapshot!(expr.to_token_stream() as Type, @r#"
+    snapshot!(expr.to_token_stream() as Type, @"
     Type::Tuple {
         elems: [
             Type::Infer,
@@ -397,7 +405,7 @@ fn test_tuple_comma() {
             Token![,],
         ],
     }
-    "#);
+    ");
 }
 
 #[test]
@@ -410,6 +418,7 @@ fn test_impl_trait_use() {
     Type::ImplTrait {
         bounds: [
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {
@@ -446,6 +455,7 @@ fn test_impl_trait_use() {
     Type::ImplTrait {
         bounds: [
             TypeParamBound::Trait(TraitBound {
+                modifiers: TraitBoundModifiers,
                 path: Path {
                     segments: [
                         PathSegment {

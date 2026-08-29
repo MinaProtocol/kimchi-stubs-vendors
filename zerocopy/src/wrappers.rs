@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0 OR MIT
+//
 // Copyright 2023 The Fuchsia Authors
 //
 // Licensed under a BSD-style license <LICENSE-BSD>, Apache License, Version 2.0
@@ -9,6 +11,7 @@
 use core::{fmt, hash::Hash};
 
 use super::*;
+use crate::pointer::{invariant::Valid, SizeEq, TransmuteFrom};
 
 /// A type with no alignment requirement.
 ///
@@ -119,26 +122,41 @@ pub struct Unalign<T>(T);
 // `KnownLayout` impl bounded on `T: KnownLayout.` This is overly restrictive.
 impl_known_layout!(T => Unalign<T>);
 
-safety_comment! {
-    /// SAFETY:
-    /// - `Unalign<T>` promises to have alignment 1, and so we don't require
-    ///   that `T: Unaligned`.
-    /// - `Unalign<T>` has the same bit validity as `T`, and so it is
-    ///   `FromZeros`, `FromBytes`, or `IntoBytes` exactly when `T` is as well.
-    /// - `Immutable`: `Unalign<T>` has the same fields as `T`, so it contains
-    ///   `UnsafeCell`s exactly when `T` does.
-    /// - `TryFromBytes`: `Unalign<T>` has the same the same bit validity as
-    ///   `T`, so `T::is_bit_valid` is a sound implementation of `is_bit_valid`.
+// FIXME(https://github.com/rust-lang/rust-clippy/issues/16087): Move these
+// attributes below the comment once this Clippy bug is fixed.
+#[cfg_attr(
+    all(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS, any(feature = "derive", test)),
+    expect(unused_unsafe)
+)]
+#[cfg_attr(
+    all(
+        not(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
+        any(feature = "derive", test)
+    ),
+    allow(unused_unsafe)
+)]
+// SAFETY:
+// - `Unalign<T>` promises to have alignment 1, and so we don't require that `T:
+//   Unaligned`.
+// - `Unalign<T>` has the same bit validity as `T`, and so it is `FromZeros`,
+//   `FromBytes`, or `IntoBytes` exactly when `T` is as well.
+// - `Immutable`: `Unalign<T>` has the same fields as `T`, so it permits
+//   interior mutation exactly when `T` does.
+// - `TryFromBytes`: `Unalign<T>` has the same the same bit validity as `T`, so
+//   `T::is_bit_valid` is a sound implementation of `is_bit_valid`.
+//
+#[allow(clippy::multiple_unsafe_ops_per_block)]
+const _: () = unsafe {
     impl_or_verify!(T => Unaligned for Unalign<T>);
     impl_or_verify!(T: Immutable => Immutable for Unalign<T>);
     impl_or_verify!(
         T: TryFromBytes => TryFromBytes for Unalign<T>;
-        |c| T::is_bit_valid(c.transmute())
+        |c| T::is_bit_valid(c.transmute::<_, _, BecauseImmutable>())
     );
     impl_or_verify!(T: FromZeros => FromZeros for Unalign<T>);
     impl_or_verify!(T: FromBytes => FromBytes for Unalign<T>);
     impl_or_verify!(T: IntoBytes => IntoBytes for Unalign<T>);
-}
+};
 
 // Note that `Unalign: Clone` only if `T: Copy`. Since the inner `T` may not be
 // aligned, there's no way to safely call `T::clone`, and so a `T: Clone` bound
@@ -167,7 +185,7 @@ impl<T> Unalign<T> {
         // `Unalign`'s `Drop::drop` from being run, since dropping is not
         // supported in `const fn`s.
         //
-        // TODO(https://github.com/rust-lang/rust/issues/73255): Destructure
+        // FIXME(https://github.com/rust-lang/rust/issues/73255): Destructure
         // instead of using unsafe.
         unsafe { crate::util::transmute_unchecked(self) }
     }
@@ -183,9 +201,12 @@ impl<T> Unalign<T> {
     #[inline(always)]
     pub fn try_deref(&self) -> Result<&T, AlignmentError<&Self, T>> {
         let inner = Ptr::from_ref(self).transmute();
-        match inner.bikeshed_try_into_aligned() {
+        match inner.try_into_aligned() {
             Ok(aligned) => Ok(aligned.as_ref()),
-            Err(err) => Err(err.map_src(|src| src.into_unalign().as_ref())),
+            Err(err) => Err(err.map_src(
+                #[inline(always)]
+                |src| src.into_unalign().as_ref(),
+            )),
         }
     }
 
@@ -200,7 +221,7 @@ impl<T> Unalign<T> {
     #[inline(always)]
     pub fn try_deref_mut(&mut self) -> Result<&mut T, AlignmentError<&mut Self, T>> {
         let inner = Ptr::from_mut(self).transmute::<_, _, (_, (_, _))>();
-        match inner.bikeshed_try_into_aligned() {
+        match inner.try_into_aligned() {
             Ok(aligned) => Ok(aligned.as_mut()),
             Err(err) => Err(err.map_src(|src| src.into_unalign().as_mut())),
         }
@@ -286,14 +307,14 @@ impl<T> Unalign<T> {
     /// such as [`read_unaligned`].
     ///
     /// [`read_unaligned`]: core::ptr::read_unaligned
-    // TODO(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
+    // FIXME(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
     #[inline(always)]
     pub fn get_mut_ptr(&mut self) -> *mut T {
         ptr::addr_of_mut!(self.0)
     }
 
     /// Sets the inner `T`, dropping the previous value.
-    // TODO(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
+    // FIXME(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
     #[inline(always)]
     pub fn set(&mut self, t: T) {
         *self = Unalign::new(t);
@@ -375,7 +396,7 @@ impl<T> Unalign<T> {
 
 impl<T: Copy> Unalign<T> {
     /// Gets a copy of the inner `T`.
-    // TODO(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
+    // FIXME(https://github.com/rust-lang/rust/issues/57349): Make this `const`.
     #[inline(always)]
     pub fn get(&self) -> T {
         let Unalign(val) = *self;
@@ -473,7 +494,7 @@ pub struct MaybeUninit<T: ?Sized + KnownLayout>(
     // on `T::MaybeUninit`) `T::MaybeUninit` has `T::LAYOUT` identical to `T`,
     // and because (invariant on `T::LAYOUT`) we can trust that `LAYOUT`
     // accurately reflects the layout of `T`. By invariant on `T::MaybeUninit`,
-    // it admits uninitialized bytes in all positions. Because `MabyeUninit` is
+    // it admits uninitialized bytes in all positions. Because `MaybeUninit` is
     // marked `repr(transparent)`, these properties additionally hold true for
     // `Self`.
     T::MaybeUninit,
@@ -579,6 +600,251 @@ impl<T: ?Sized + KnownLayout> fmt::Debug for MaybeUninit<T> {
     }
 }
 
+#[allow(unreachable_pub)] // False positive on MSRV
+#[doc(hidden)]
+pub use read_only_def::*;
+mod read_only_def {
+    /// A read-only wrapper.
+    ///
+    /// A `ReadOnly<T>` disables any interior mutability in `T`, ensuring that
+    /// a `&ReadOnly<T>` is genuinely read-only. Thus, `ReadOnly<T>` is
+    /// [`Immutable`] regardless of whether `T` is.
+    ///
+    /// Note that `&mut ReadOnly<T>` still permits mutation – the read-only
+    /// property only applies to shared references.
+    ///
+    /// [`Immutable`]: crate::Immutable
+    #[repr(transparent)]
+    pub struct ReadOnly<T: ?Sized> {
+        // INVARIANT: `inner` is never mutated through a `&ReadOnly<T>`
+        // reference.
+        inner: T,
+    }
+
+    impl<T> ReadOnly<T> {
+        /// Creates a new `ReadOnly`.
+        #[must_use]
+        #[inline(always)]
+        pub const fn new(t: T) -> ReadOnly<T> {
+            ReadOnly { inner: t }
+        }
+
+        /// Returns the inner value.
+        #[must_use]
+        #[inline(always)]
+        pub fn into_inner(r: ReadOnly<T>) -> T {
+            r.inner
+        }
+    }
+
+    impl<T: ?Sized> ReadOnly<T> {
+        #[inline(always)]
+        pub(crate) fn as_mut(r: &mut ReadOnly<T>) -> &mut T {
+            // SAFETY: `r: &mut ReadOnly`, so this doesn't violate the invariant
+            // that `inner` is never mutated through a `&ReadOnly<T>` reference.
+            &mut r.inner
+        }
+
+        /// # Safety
+        ///
+        /// The caller promises not to mutate the referent (i.e., via interior
+        /// mutation).
+        pub(crate) const unsafe fn as_ref_unchecked(r: &ReadOnly<T>) -> &T {
+            // SAFETY: The caller promises not to mutate the referent.
+            &r.inner
+        }
+    }
+}
+
+// SAFETY: `ReadOnly<T>` is a `#[repr(transparent)` wrapper around `T`.
+const _: () = unsafe {
+    unsafe_impl_known_layout!(T: ?Sized + KnownLayout => #[repr(T)] ReadOnly<T>);
+};
+
+#[allow(clippy::multiple_unsafe_ops_per_block)]
+// SAFETY:
+// - `ReadOnly<T>` has the same alignment as `T`, and so it is `Unaligned`
+//   exactly when `T` is as well.
+// - `ReadOnly<T>` has the same bit validity as `T`, and so this `is_bit_valid`
+//   implementation is correct, and thus the `TryFromBytes` impl is sound.
+// - `ReadOnly<T>` has the same bit validity as `T`, and so it is `FromZeros`,
+//   `FromBytes`, and `IntoBytes` exactly when `T` is as well.
+const _: () = unsafe {
+    unsafe_impl!(T: ?Sized + Unaligned => Unaligned for ReadOnly<T>);
+    unsafe_impl!(
+        T: ?Sized + TryFromBytes => TryFromBytes for ReadOnly<T>;
+        |c| T::is_bit_valid(c.cast::<_, <ReadOnly<T> as SizeEq<ReadOnly<ReadOnly<T>>>>::CastFrom, _>())
+    );
+    unsafe_impl!(T: ?Sized + FromZeros => FromZeros for ReadOnly<T>);
+    unsafe_impl!(T: ?Sized + FromBytes => FromBytes for ReadOnly<T>);
+    unsafe_impl!(T: ?Sized + IntoBytes => IntoBytes for ReadOnly<T>);
+};
+
+// SAFETY: By invariant, `inner` is never mutated through a `&ReadOnly<T>`
+// reference.
+const _: () = unsafe {
+    unsafe_impl!(T: ?Sized => Immutable for ReadOnly<T>);
+};
+
+const _: () = {
+    use crate::pointer::cast::CastExact;
+
+    // SAFETY: `ReadOnly<T>` has the same layout as `T`.
+    define_cast!(unsafe { pub CastFromReadOnly<T: ?Sized> = ReadOnly<T> => T});
+    // SAFETY: `ReadOnly<T>` has the same layout as `T`.
+    unsafe impl<T: ?Sized> CastExact<ReadOnly<T>, T> for CastFromReadOnly {}
+    // SAFETY: `ReadOnly<T>` has the same layout as `T`.
+    define_cast!(unsafe { pub CastToReadOnly<T: ?Sized> = T => ReadOnly<T>});
+    // SAFETY: `ReadOnly<T>` has the same layout as `T`.
+    unsafe impl<T: ?Sized> CastExact<T, ReadOnly<T>> for CastToReadOnly {}
+
+    impl<T: ?Sized> SizeEq<ReadOnly<T>> for T {
+        type CastFrom = CastFromReadOnly;
+    }
+
+    impl<T: ?Sized> SizeEq<T> for ReadOnly<T> {
+        type CastFrom = CastToReadOnly;
+    }
+};
+
+// SAFETY: `ReadOnly<T>` is a `#[repr(transparent)]` wrapper around `T`, and so
+// it has the same bit validity as `T`.
+unsafe impl<T: ?Sized> TransmuteFrom<T, Valid, Valid> for ReadOnly<T> {}
+
+// SAFETY: `ReadOnly<T>` is a `#[repr(transparent)]` wrapper around `T`, and so
+// it has the same bit validity as `T`.
+unsafe impl<T: ?Sized> TransmuteFrom<ReadOnly<T>, Valid, Valid> for T {}
+
+impl<'a, T: ?Sized + Immutable> From<&'a T> for &'a ReadOnly<T> {
+    #[inline(always)]
+    fn from(t: &'a T) -> &'a ReadOnly<T> {
+        let ro = Ptr::from_ref(t).transmute::<_, _, (_, _)>();
+        // SAFETY: `ReadOnly<T>` has the same alignment as `T`, and
+        // `Ptr::from_ref` produces an aligned `Ptr`.
+        let ro = unsafe { ro.assume_alignment() };
+        ro.as_ref()
+    }
+}
+
+impl<T: ?Sized + Immutable> Deref for ReadOnly<T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: By `T: Immutable`, `&T` doesn't permit interior mutation.
+        unsafe { ReadOnly::as_ref_unchecked(self) }
+    }
+}
+
+impl<T: ?Sized + Immutable> DerefMut for ReadOnly<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        ReadOnly::as_mut(self)
+    }
+}
+
+impl<T: ?Sized + Immutable + Debug> Debug for ReadOnly<T> {
+    #[inline(always)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
+// SAFETY: See safety comment on `ProjectToTag`.
+unsafe impl<T: HasTag + ?Sized> HasTag for ReadOnly<T> {
+    #[allow(clippy::missing_inline_in_public_items)]
+    fn only_derive_is_allowed_to_implement_this_trait()
+    where
+        Self: Sized,
+    {
+    }
+
+    type Tag = T::Tag;
+
+    // SAFETY: `<T as SizeEq<ReadOnly<T>>>::CastFrom` is a no-op projection that
+    // produces a pointer with the same referent. By invariant, for any `Ptr<'_,
+    // T, I>` it is sound to use `T::ProjectToTag` to project to a `Ptr<'_,
+    // T::Tag, I>`. Since `ReadOnly<T>` has the same layout and validity as `T`,
+    // the same is true of projecting from a `Ptr<'_, ReadOnly<T>, I>`.
+    type ProjectToTag = crate::pointer::cast::TransitiveProject<
+        T,
+        <T as SizeEq<ReadOnly<T>>>::CastFrom,
+        T::ProjectToTag,
+    >;
+}
+
+// SAFETY: `ReadOnly<T>` is a `#[repr(transparent)]` wrapper around `T`, and so
+// has the same fields at the same offsets. Thus, it satisfies the safety
+// invariants of `HasField<Field, VARIANT_ID, FIELD_ID>` for field `f` exactly
+// when `T` does, as guaranteed by the `T: HasField` bound:
+// - If `VARIANT_ID` is `STRUCT_VARIANT_ID` or `UNION_VARIANT_ID`, then `T` has
+//   the layout of a struct or union type. Since `ReadOnly<T>` is a transparent
+//   wrapper around `T`, it does too. Otherwise, if `VARIANT_ID` is an enum
+//   variant index, then `T` has the layout of an enum type, and `ReadOnly<T>`
+//   does too.
+// - By `T: HasField<_, _, FIELD_ID>`:
+//   - `T` has a field `f` with name `n` such that
+//     `FIELD_ID = zerocopy::ident_id!(n)` or at index `i` such that
+//     `FIELD_ID = zerocopy::ident_id!(i)`.
+//   - `Field` has the same visibility as `f`.
+//   - `T::Type` has the same type as `f`. Thus, `ReadOnly<T::Type>` has the
+//     same type as `f`, wrapped in `ReadOnly`.
+//
+// `project` satisfies its post-condition – namely, that the returned pointer
+// refers to a non-strict subset of the bytes of `slf`'s referent, and has the
+// same provenance as `slf` – because all intermediate operations satisfy those
+// same conditions.
+unsafe impl<T, Field, const VARIANT_ID: i128, const FIELD_ID: i128>
+    HasField<Field, VARIANT_ID, FIELD_ID> for ReadOnly<T>
+where
+    T: HasField<Field, VARIANT_ID, FIELD_ID> + ?Sized,
+{
+    #[allow(clippy::missing_inline_in_public_items)]
+    fn only_derive_is_allowed_to_implement_this_trait()
+    where
+        Self: Sized,
+    {
+    }
+
+    type Type = ReadOnly<T::Type>;
+
+    #[inline(always)]
+    fn project(slf: PtrInner<'_, Self>) -> *mut ReadOnly<T::Type> {
+        slf.project::<_, <T as SizeEq<ReadOnly<T>>>::CastFrom>()
+            .project::<_, crate::pointer::cast::Projection<Field, VARIANT_ID, FIELD_ID>>()
+            .project::<_, <ReadOnly<T::Type> as SizeEq<T::Type>>::CastFrom>()
+            .as_non_null()
+            .as_ptr()
+    }
+}
+
+// SAFETY: `ReadOnly<T>` is a `#[repr(transparent)]` wrapper around `T`, and so
+// has the same fields at the same offsets. `is_projectable` simply delegates to
+// `T::is_projectable`, which is sound because a `Ptr<'_, ReadOnly<T>, I>` will
+// be projectable exactly when a `Ptr<'_, T, I>` referent is.
+unsafe impl<T, Field, I, const VARIANT_ID: i128, const FIELD_ID: i128>
+    ProjectField<Field, I, VARIANT_ID, FIELD_ID> for ReadOnly<T>
+where
+    T: ProjectField<Field, I, VARIANT_ID, FIELD_ID> + ?Sized,
+    I: invariant::Invariants,
+{
+    #[allow(clippy::missing_inline_in_public_items)]
+    fn only_derive_is_allowed_to_implement_this_trait()
+    where
+        Self: Sized,
+    {
+    }
+
+    type Invariants = T::Invariants;
+
+    type Error = T::Error;
+
+    #[inline(always)]
+    fn is_projectable<'a>(ptr: Ptr<'a, Self::Tag, I>) -> Result<(), Self::Error> {
+        T::is_projectable(ptr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::panic::AssertUnwindSafe;
@@ -629,7 +895,7 @@ mod tests {
         const _U64: u64 = _UNALIGN.into_inner();
         // Make sure all code is considered "used".
         //
-        // TODO(https://github.com/rust-lang/rust/issues/104084): Remove this
+        // FIXME(https://github.com/rust-lang/rust/issues/104084): Remove this
         // attribute.
         #[allow(dead_code)]
         const _: () = {
@@ -747,5 +1013,22 @@ mod tests {
             assert_eq!(&input[..] as *const _, output as *const _);
             assert_eq!(input, *output);
         }
+    }
+    #[test]
+    fn test_maybe_uninit_uninit() {
+        let _uninit = MaybeUninit::<u8>::uninit();
+        // Cannot check value, but can check it compiles and runs
+    }
+
+    #[test]
+    #[cfg(feature = "alloc")]
+    fn test_maybe_uninit_new_boxed_uninit() {
+        let _boxed = MaybeUninit::<u8>::new_boxed_uninit(()).unwrap();
+    }
+
+    #[test]
+    fn test_maybe_uninit_debug() {
+        let uninit = MaybeUninit::<u8>::uninit();
+        assert!(format!("{:?}", uninit).contains("MaybeUninit"));
     }
 }

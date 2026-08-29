@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0 OR MIT
+//
 // Copyright 2024 The Fuchsia Authors
 //
 // Licensed under a BSD-style license <LICENSE-BSD>, Apache License, Version 2.0
@@ -15,9 +17,6 @@ use core::{
     ops::{Deref, DerefMut},
 };
 
-#[cfg(doc)]
-use crate::Ref;
-
 // For each trait polyfill, as soon as the corresponding feature is stable, the
 // polyfill import will be unused because method/function resolution will prefer
 // the inherent method/function over a trait method/function. Thus, we suppress
@@ -26,6 +25,8 @@ use crate::Ref;
 // See the documentation on `util::polyfills` for more information.
 #[allow(unused_imports)]
 use crate::util::polyfills::{self, NonNullExt as _, NumExt as _};
+#[cfg(doc)]
+use crate::Ref;
 
 /// A mutable or immutable reference to a byte slice.
 ///
@@ -112,7 +113,7 @@ pub unsafe trait SplitByteSlice: ByteSlice {
         if mid <= self.deref().len() {
             // SAFETY: Above, we ensure that `mid <= self.deref().len()`. By
             // invariant on `ByteSlice`, a supertrait of `SplitByteSlice`,
-            // `.deref()` is guranteed to be "stable"; i.e., it will always
+            // `.deref()` is guaranteed to be "stable"; i.e., it will always
             // dereference to a byte slice of the same address and length. Thus,
             // we can be sure that the above precondition remains satisfied
             // through the call to `split_at_unchecked`.
@@ -194,15 +195,15 @@ pub unsafe trait IntoByteSliceMut<'a>: IntoByteSlice<'a> + ByteSliceMut {
     fn into_byte_slice_mut(self) -> &'a mut [u8];
 }
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl ByteSlice for &[u8] {}
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl CopyableByteSlice for &[u8] {}
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl CloneableByteSlice for &[u8] {}
 
@@ -212,8 +213,11 @@ unsafe impl SplitByteSlice for &[u8] {
     #[inline]
     unsafe fn split_at_unchecked(self, mid: usize) -> (Self, Self) {
         // SAFETY: By contract on caller, `mid` is not greater than
-        // `bytes.len()`.
-        unsafe { (<[u8]>::get_unchecked(self, ..mid), <[u8]>::get_unchecked(self, mid..)) }
+        // `self.len()`.
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
+        unsafe {
+            (<[u8]>::get_unchecked(self, ..mid), <[u8]>::get_unchecked(self, mid..))
+        }
     }
 }
 
@@ -229,7 +233,7 @@ unsafe impl<'a> IntoByteSlice<'a> for &'a [u8] {
     }
 }
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl ByteSlice for &mut [u8] {}
 
@@ -254,8 +258,8 @@ unsafe impl SplitByteSlice for &mut [u8] {
         // SAFETY: By contract on caller, `mid` is not greater than
         // `self.len()`.
         //
-        // TODO(#67): Remove this allow. See NumExt for more details.
-        #[allow(unstable_name_collisions, clippy::incompatible_msrv)]
+        // FIXME(#67): Remove this allow. See NumExt for more details.
+        #[allow(unstable_name_collisions)]
         let r_len = unsafe { self.len().unchecked_sub(mid) };
 
         // SAFETY: These invocations of `from_raw_parts_mut` satisfy its
@@ -286,7 +290,10 @@ unsafe impl SplitByteSlice for &mut [u8] {
         //   `isize::MAX`, by invariant on `self`.
         //
         // [1] https://doc.rust-lang.org/std/slice/fn.from_raw_parts_mut.html#safety
-        unsafe { (from_raw_parts_mut(l_ptr, l_len), from_raw_parts_mut(r_ptr, r_len)) }
+        #[allow(clippy::multiple_unsafe_ops_per_block)]
+        unsafe {
+            (from_raw_parts_mut(l_ptr, l_len), from_raw_parts_mut(r_ptr, r_len))
+        }
     }
 }
 
@@ -314,7 +321,7 @@ unsafe impl<'a> IntoByteSliceMut<'a> for &'a mut [u8] {
     }
 }
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl ByteSlice for cell::Ref<'_, [u8]> {}
 
@@ -334,7 +341,7 @@ unsafe impl SplitByteSlice for cell::Ref<'_, [u8]> {
     }
 }
 
-// TODO(#429): Add a "SAFETY" comment and remove this `allow`.
+// FIXME(#429): Add a "SAFETY" comment and remove this `allow`.
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe impl ByteSlice for cell::RefMut<'_, [u8]> {}
 
@@ -360,7 +367,7 @@ mod proofs {
 
     fn any_vec() -> Vec<u8> {
         let len = kani::any();
-        kani::assume(len <= isize::MAX as usize);
+        kani::assume(len <= crate::DstLayout::MAX_SIZE);
         vec![0u8; len]
     }
 
@@ -394,5 +401,34 @@ mod proofs {
 
         assert_eq!(slc.cast::<u8>(), l.cast::<u8>());
         assert_eq!(unsafe { slc.cast::<u8>().add(mid) }, r.cast::<u8>());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::RefCell;
+
+    use super::*;
+
+    #[test]
+    fn test_ref_split_at_unchecked() {
+        let cell = RefCell::new([1, 2, 3, 4]);
+        let borrow = cell.borrow();
+        let slice_ref: cell::Ref<'_, [u8]> = cell::Ref::map(borrow, |a| &a[..]);
+        // SAFETY: 2 is within bounds of [1, 2, 3, 4]
+        let (l, r) = unsafe { slice_ref.split_at_unchecked(2) };
+        assert_eq!(*l, [1, 2]);
+        assert_eq!(*r, [3, 4]);
+    }
+
+    #[test]
+    fn test_ref_mut_split_at_unchecked() {
+        let cell = RefCell::new([1, 2, 3, 4]);
+        let borrow_mut = cell.borrow_mut();
+        let slice_ref_mut: cell::RefMut<'_, [u8]> = cell::RefMut::map(borrow_mut, |a| &mut a[..]);
+        // SAFETY: 2 is within bounds of [1, 2, 3, 4]
+        let (l, r) = unsafe { slice_ref_mut.split_at_unchecked(2) };
+        assert_eq!(*l, [1, 2]);
+        assert_eq!(*r, [3, 4]);
     }
 }

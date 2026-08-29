@@ -10,10 +10,20 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 name = "rmp"
-version = "0.8.14"
-authors = ["Evgeny Safronov <division494@gmail.com>"]
+version = "0.8.15"
+authors = [
+    "Evgeny Safronov <division494@gmail.com>",
+    "Kornel <kornel@geekhood.net>",
+]
+build = false
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "Pure Rust MessagePack serialization implementation"
 documentation = "https://docs.rs/rmp"
 readme = "README.md"
@@ -24,30 +34,38 @@ keywords = [
 categories = ["encoding"]
 license = "MIT"
 repository = "https://github.com/3Hren/msgpack-rust"
+resolver = "2"
 
 [package.metadata.release]
 tag-prefix = "{{crate_name}}/"
 
-[dependencies.byteorder]
-version = "1.4.2"
-default-features = false
-
-[dependencies.num-traits]
-version = "0.2.14"
-default-features = false
-
-[dependencies.paste]
-version = "1.0"
-
-[dev-dependencies.quickcheck]
-version = "1.0.2"
+[badges.maintenance]
+status = "looking-for-maintainer"
 
 [features]
 default = ["std"]
-std = [
-    "byteorder/std",
-    "num-traits/std",
-]
+std = ["num-traits/std"]
 
-[badges.maintenance]
-status = "looking-for-maintainer"
+[lib]
+name = "rmp"
+path = "src/lib.rs"
+
+[[example]]
+name = "inspect"
+path = "examples/inspect.rs"
+required-features = ["std"]
+
+[[test]]
+name = "lib"
+path = "tests/lib.rs"
+
+[[bench]]
+name = "bench"
+path = "benches/bench.rs"
+
+[dependencies.num-traits]
+version = "0.2.19"
+default-features = false
+
+[dev-dependencies.quickcheck]
+version = "1.0.3"

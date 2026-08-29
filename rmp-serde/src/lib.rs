@@ -1,63 +1,15 @@
-//! This crate connects Rust MessagePack library with [`serde`][serde] providing an ability to
-//! easily serialize and deserialize both Rust built-in types, the standard library and custom data
-//! structures.
-//!
-//! ## Motivating example
-//!
-//! ```
-//! let buf = rmp_serde::to_vec(&(42, "the Answer")).unwrap();
-//!
-//! assert_eq!(
-//!     vec![0x92, 0x2a, 0xaa, 0x74, 0x68, 0x65, 0x20, 0x41, 0x6e, 0x73, 0x77, 0x65, 0x72],
-//!     buf
-//! );
-//!
-//! assert_eq!((42, "the Answer"), rmp_serde::from_slice(&buf).unwrap());
-//! ```
-//!
-//! # Type-based Serialization and Deserialization
-//!
-//! Serde provides a mechanism for low boilerplate serialization & deserialization of values to and
-//! from MessagePack via the serialization API.
-//!
-//! To be able to serialize a piece of data, it must implement the `serde::Serialize` trait. To be
-//! able to deserialize a piece of data, it must implement the `serde::Deserialize` trait. Serde
-//! provides an annotation to automatically generate the code for these
-//! traits: `#[derive(Serialize, Deserialize)]`.
-//!
-//! # Examples
-//!
-//! ```
-//! use std::collections::HashMap;
-//! use serde::{Deserialize, Serialize};
-//! use rmp_serde::{Deserializer, Serializer};
-//!
-//! #[derive(Debug, PartialEq, Deserialize, Serialize)]
-//! struct Human {
-//!     age: u32,
-//!     name: String,
-//! }
-//!
-//! fn main() {
-//!     let mut buf = Vec::new();
-//!     let val = Human {
-//!         age: 42,
-//!         name: "John".into(),
-//!     };
-//!
-//!     val.serialize(&mut Serializer::new(&mut buf)).unwrap();
-//! }
-//! ```
-//!
-//! [serde]: https://serde.rs/
+#![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations, missing_docs)]
+#![allow(clippy::bool_assert_comparison)]
+#![allow(clippy::derive_partial_eq_without_eq)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::match_same_arms)]
 
 use std::fmt::{self, Display, Formatter};
 use std::str::{self, Utf8Error};
 
-use serde::de;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 
 #[allow(deprecated)]
 pub use crate::decode::from_read_ref;
@@ -66,6 +18,7 @@ pub use crate::encode::{to_vec, to_vec_named, Serializer};
 
 pub use crate::decode::from_slice;
 
+mod bytes;
 pub mod config;
 pub mod decode;
 pub mod encode;
@@ -114,13 +67,11 @@ impl Raw {
     #[must_use]
     pub fn from_utf8(v: Vec<u8>) -> Self {
         match String::from_utf8(v) {
-            Ok(v) => Raw::new(v),
+            Ok(v) => Self::new(v),
             Err(err) => {
                 let e = err.utf8_error();
-                Self {
-                    s: Err((err.into_bytes(), e)),
-                }
-            }
+                Self { s: Err((err.into_bytes(), e)) }
+            },
         }
     }
 
@@ -201,7 +152,7 @@ impl Serialize for Raw {
 
 struct RawVisitor;
 
-impl<'de> de::Visitor<'de> for RawVisitor {
+impl de::Visitor<'_> for RawVisitor {
     type Value = Raw;
 
     #[cold]
@@ -242,7 +193,7 @@ impl<'de> de::Visitor<'de> for RawVisitor {
             Err(err) => {
                 let e = err.utf8_error();
                 Err((err.into_bytes(), e))
-            }
+            },
         };
 
         Ok(Raw { s })
@@ -281,11 +232,7 @@ impl<'a> RawRef<'a> {
     pub fn from_utf8(v: &'a [u8]) -> Self {
         match str::from_utf8(v) {
             Ok(v) => RawRef::new(v),
-            Err(err) => {
-                Self {
-                    s: Err((v, err))
-                }
-            }
+            Err(err) => Self { s: Err((v, err)) },
         }
     }
 
@@ -307,10 +254,7 @@ impl<'a> RawRef<'a> {
     #[inline]
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
-        match self.s {
-            Ok(s) => Some(s),
-            Err(..) => None,
-        }
+        self.s.ok()
     }
 
     /// Returns the underlying `Utf8Error` if the raw contains invalid UTF-8 sequence, or
@@ -335,7 +279,7 @@ impl<'a> RawRef<'a> {
     }
 }
 
-impl<'a> Serialize for RawRef<'a> {
+impl Serialize for RawRef<'_> {
     fn serialize<S>(&self, se: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

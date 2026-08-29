@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-2-Clause OR Apache-2.0 OR MIT
+//
 // Copyright 2022 The Fuchsia Authors
 //
 // Licensed under a BSD-style license <LICENSE-BSD>, Apache License, Version 2.0
@@ -17,26 +19,24 @@
 
 #![allow(missing_debug_implementations)]
 
-use core::{
-    mem::{self, ManuallyDrop},
-    ptr::NonNull,
-};
-
-// TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove this
-// `cfg` when `size_of_val_raw` is stabilized.
+// FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835): Remove
+// this `cfg` when `size_of_val_raw` is stabilized.
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[cfg(not(target_pointer_width = "16"))]
-use core::ptr;
+use core::ptr::{self, NonNull};
+use core::{marker::PhantomData, mem, num::Wrapping};
 
 use crate::{
     pointer::{
-        invariant::{self, BecauseExclusive, BecauseImmutable, Invariants},
-        TryTransmuteFromPtr,
+        cast::CastSized,
+        invariant::{Aligned, Initialized, Valid},
+        BecauseImmutable,
     },
-    FromBytes, Immutable, IntoBytes, Ptr, TryFromBytes, ValidityError,
+    FromBytes, Immutable, IntoBytes, KnownLayout, Ptr, ReadOnly, TryFromBytes, ValidityError,
 };
 
-/// Projects the type of the field at `Index` in `Self`.
+/// Projects the type of the field at `Index` in `Self` without regard for field
+/// privacy.
 ///
 /// The `Index` parameter is any sort of handle that identifies the field; its
 /// definition is the obligation of the implementer.
@@ -51,66 +51,42 @@ pub unsafe trait Field<Index> {
 }
 
 #[cfg_attr(
-    zerocopy_diagnostic_on_unimplemented_1_78_0,
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
     diagnostic::on_unimplemented(
-        message = "`{T}` has inter-field padding",
+        message = "`{T}` has {PADDING_BYTES} total byte(s) of padding",
         label = "types with padding cannot implement `IntoBytes`",
         note = "consider using `zerocopy::Unalign` to lower the alignment of individual fields",
         note = "consider adding explicit fields where padding would be",
-        note = "consider using `#[repr(packed)]` to remove inter-field padding"
+        note = "consider using `#[repr(packed)]` to remove padding"
     )
 )]
-pub trait PaddingFree<T: ?Sized, const HAS_PADDING: bool> {}
-impl<T: ?Sized> PaddingFree<T, false> for () {}
+pub trait PaddingFree<T: ?Sized, const PADDING_BYTES: usize> {}
+impl<T: ?Sized> PaddingFree<T, 0> for () {}
 
-/// A type whose size is equal to `align_of::<T>()`.
-#[repr(C)]
-pub struct AlignOf<T> {
-    // This field ensures that:
-    // - The size is always at least 1 (the minimum possible alignment).
-    // - If the alignment is greater than 1, Rust has to round up to the next
-    //   multiple of it in order to make sure that `Align`'s size is a multiple
-    //   of that alignment. Without this field, its size could be 0, which is a
-    //   valid multiple of any alignment.
-    _u: u8,
-    _a: [T; 0],
-}
+// FIXME(#1112): In the slice DST case, we should delegate to *both*
+// `PaddingFree` *and* `DynamicPaddingFree` (and probably rename `PaddingFree`
+// to `StaticPaddingFree` or something - or introduce a third trait with that
+// name) so that we can have more clear error messages.
 
-impl<T> AlignOf<T> {
-    #[inline(never)] // Make `missing_inline_in_public_items` happy.
-    #[cfg_attr(
-        all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
-        coverage(off)
-    )]
-    pub fn into_t(self) -> T {
-        unreachable!()
-    }
-}
-
-/// A type whose size is equal to `max(align_of::<T>(), align_of::<U>())`.
-#[repr(C)]
-pub union MaxAlignsOf<T, U> {
-    _t: ManuallyDrop<AlignOf<T>>,
-    _u: ManuallyDrop<AlignOf<U>>,
-}
-
-impl<T, U> MaxAlignsOf<T, U> {
-    #[inline(never)] // Make `missing_inline_in_public_items` happy.
-    #[cfg_attr(
-        all(coverage_nightly, __ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS),
-        coverage(off)
-    )]
-    pub fn new(_t: T, _u: U) -> MaxAlignsOf<T, U> {
-        unreachable!()
-    }
-}
+#[cfg_attr(
+    not(no_zerocopy_diagnostic_on_unimplemented_1_78_0),
+    diagnostic::on_unimplemented(
+        message = "`{T}` has one or more padding bytes",
+        label = "types with padding cannot implement `IntoBytes`",
+        note = "consider using `zerocopy::Unalign` to lower the alignment of individual fields",
+        note = "consider adding explicit fields where padding would be",
+        note = "consider using `#[repr(packed)]` to remove padding"
+    )
+)]
+pub trait DynamicPaddingFree<T: ?Sized, const HAS_PADDING: bool> {}
+impl<T: ?Sized> DynamicPaddingFree<T, false> for () {}
 
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[cfg(not(target_pointer_width = "16"))]
 const _64K: usize = 1 << 16;
 
-// TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove this
-// `cfg` when `size_of_val_raw` is stabilized.
+// FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835): Remove
+// this `cfg` when `size_of_val_raw` is stabilized.
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[cfg(not(target_pointer_width = "16"))]
 #[repr(C, align(65536))]
@@ -122,8 +98,8 @@ struct Aligned64kAllocation([u8; _64K]);
 ///
 /// `ALIGNED_64K_ALLOCATION` is guaranteed to point to the entirety of an
 /// allocation with size and alignment 2^16, and to have valid provenance.
-// TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove this
-// `cfg` when `size_of_val_raw` is stabilized.
+// FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835): Remove
+// this `cfg` when `size_of_val_raw` is stabilized.
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[cfg(not(target_pointer_width = "16"))]
 pub const ALIGNED_64K_ALLOCATION: NonNull<[u8]> = {
@@ -139,9 +115,9 @@ pub const ALIGNED_64K_ALLOCATION: NonNull<[u8]> = {
     // - `ptr` is derived from a Rust reference, which is guaranteed to have
     //   valid provenance.
     //
-    // TODO(#429): Once `NonNull::new_unchecked` docs document that it preserves
-    // provenance, cite those docs.
-    // TODO: Replace this `as` with `ptr.cast_mut()` once our MSRV >= 1.65
+    // FIXME(#429): Once `NonNull::new_unchecked` docs document that it
+    // preserves provenance, cite those docs.
+    // FIXME: Replace this `as` with `ptr.cast_mut()` once our MSRV >= 1.65
     #[allow(clippy::as_conversions)]
     unsafe {
         NonNull::new_unchecked(ptr as *mut _)
@@ -152,8 +128,8 @@ pub const ALIGNED_64K_ALLOCATION: NonNull<[u8]> = {
 /// the type `$ty`.
 ///
 /// `trailing_field_offset!` produces code which is valid in a `const` context.
-// TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove this
-// `cfg` when `size_of_val_raw` is stabilized.
+// FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835): Remove
+// this `cfg` when `size_of_val_raw` is stabilized.
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
 #[macro_export]
@@ -162,8 +138,6 @@ macro_rules! trailing_field_offset {
         let min_size = {
             let zero_elems: *const [()] =
                 $crate::util::macro_util::core_reexport::ptr::slice_from_raw_parts(
-                    // Work around https://github.com/rust-lang/rust-clippy/issues/12280
-                    #[allow(clippy::incompatible_msrv)]
                     $crate::util::macro_util::core_reexport::ptr::NonNull::<()>::dangling()
                         .as_ptr()
                         .cast_const(),
@@ -234,7 +208,7 @@ macro_rules! trailing_field_offset {
         //   address space. This is guaranteed because the same is guaranteed of
         //   allocated objects. [1]
         //
-        // [1] TODO(#429), TODO(https://github.com/rust-lang/rust/pull/116675):
+        // [1] FIXME(#429), FIXME(https://github.com/rust-lang/rust/pull/116675):
         //     Once these are guaranteed in the Reference, cite it.
         let offset = unsafe { field.cast::<u8>().offset_from(ptr.cast::<u8>()) };
         // Guaranteed not to be lossy: `field` comes after `ptr`, so the offset
@@ -252,8 +226,8 @@ macro_rules! trailing_field_offset {
 /// Computes alignment of `$ty: ?Sized`.
 ///
 /// `align_of!` produces code which is valid in a `const` context.
-// TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove this
-// `cfg` when `size_of_val_raw` is stabilized.
+// FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835): Remove
+// this `cfg` when `size_of_val_raw` is stabilized.
 #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
 #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
 #[macro_export]
@@ -266,7 +240,7 @@ macro_rules! align_of {
         // correctly-align the entire struct.
         //
         // This macro computes the alignment of `$ty` by counting the number of
-        // bytes preceeding `_trailing`. For instance, if the alignment of `$ty`
+        // bytes preceding `_trailing`. For instance, if the alignment of `$ty`
         // is `1`, then no padding is required align `_trailing` and it will be
         // located immediately after `_byte` at offset 1. If the alignment of
         // `$ty` is 2, then a single padding byte is required before
@@ -317,12 +291,12 @@ pub type SizeToTag<const SIZE: usize> = <() as size_to_tag::SizeToTag<SIZE>>::Ta
 
 // We put `Sized` in its own module so it can have the same name as the standard
 // library `Sized` without shadowing it in the parent module.
-#[cfg(zerocopy_diagnostic_on_unimplemented_1_78_0)]
+#[cfg(not(no_zerocopy_diagnostic_on_unimplemented_1_78_0))]
 mod __size_of {
     #[diagnostic::on_unimplemented(
         message = "`{Self}` is unsized",
-        label = "`IntoBytes` needs all field types to be `Sized` in order to determine whether there is inter-field padding",
-        note = "consider using `#[repr(packed)]` to remove inter-field padding",
+        label = "`IntoBytes` needs all field types to be `Sized` in order to determine whether there is padding",
+        note = "consider using `#[repr(packed)]` to remove padding",
         note = "`IntoBytes` does not require the fields of `#[repr(packed)]` types to be `Sized`"
     )]
     pub trait Sized: core::marker::Sized {}
@@ -336,274 +310,204 @@ mod __size_of {
     }
 }
 
-#[cfg(zerocopy_diagnostic_on_unimplemented_1_78_0)]
-pub use __size_of::size_of;
-#[cfg(not(zerocopy_diagnostic_on_unimplemented_1_78_0))]
+#[cfg(no_zerocopy_diagnostic_on_unimplemented_1_78_0)]
 pub use core::mem::size_of;
 
-/// Does the struct type `$t` have padding?
+#[cfg(not(no_zerocopy_diagnostic_on_unimplemented_1_78_0))]
+pub use __size_of::size_of;
+
+/// How many padding bytes does the struct type `$t` have?
 ///
-/// `$ts` is the list of the type of every field in `$t`. `$t` must be a
-/// struct type, or else `struct_has_padding!`'s result may be meaningless.
+/// `$ts` is the list of the type of every field in `$t`. `$t` must be a struct
+/// type, or else `struct_padding!`'s result may be meaningless.
 ///
-/// Note that `struct_has_padding!`'s results are independent of `repcr` since
-/// they only consider the size of the type and the sizes of the fields.
-/// Whatever the repr, the size of the type already takes into account any
-/// padding that the compiler has decided to add. Structs with well-defined
-/// representations (such as `repr(C)`) can use this macro to check for padding.
-/// Note that while this may yield some consistent value for some `repr(Rust)`
-/// structs, it is not guaranteed across platforms or compilations.
+/// Note that `struct_padding!`'s results are independent of `repcr` since they
+/// only consider the size of the type and the sizes of the fields. Whatever the
+/// repr, the size of the type already takes into account any padding that the
+/// compiler has decided to add. Structs with well-defined representations (such
+/// as `repr(C)`) can use this macro to check for padding. Note that while this
+/// may yield some consistent value for some `repr(Rust)` structs, it is not
+/// guaranteed across platforms or compilations.
 #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
 #[macro_export]
-macro_rules! struct_has_padding {
-    ($t:ty, [$($ts:ty),*]) => {
-        $crate::util::macro_util::size_of::<$t>() > 0 $(+ $crate::util::macro_util::size_of::<$ts>())*
+macro_rules! struct_padding {
+    ($t:ty, $_align:expr, $_packed:expr, [$($ts:ty),*]) => {{
+        // The `align` and `packed` directives can be ignored here. Regardless
+        // of if and how they are set, comparing the size of `$t` to the sum of
+        // its field sizes is a reliable indicator of the presence of padding.
+        $crate::util::macro_util::size_of::<$t>() - (0 $(+ $crate::util::macro_util::size_of::<$ts>())*)
+    }};
+}
+
+/// Does the `repr(C)` struct type `$t` have padding?
+///
+/// `$ts` is the list of the type of every field in `$t`. `$t` must be a
+/// `repr(C)` struct type, or else `struct_has_padding!`'s result may be
+/// meaningless.
+#[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
+#[macro_export]
+macro_rules! repr_c_struct_has_padding {
+    ($t:ty, $align:expr, $packed:expr, [$($ts:tt),*]) => {{
+        let layout = $crate::DstLayout::for_repr_c_struct(
+            $align,
+            $packed,
+            &[$($crate::repr_c_struct_has_padding!(@field $ts),)*]
+        );
+        layout.requires_static_padding() || layout.requires_dynamic_padding()
+    }};
+    (@field ([$t:ty])) => {
+        <[$t] as $crate::KnownLayout>::LAYOUT
+    };
+    (@field ($t:ty)) => {
+        $crate::DstLayout::for_unpadded_type::<$t>()
+    };
+    (@field [$t:ty]) => {
+        <[$t] as $crate::KnownLayout>::LAYOUT
+    };
+    (@field $t:ty) => {
+        $crate::DstLayout::for_unpadded_type::<$t>()
     };
 }
 
 /// Does the union type `$t` have padding?
 ///
-/// `$ts` is the list of the type of every field in `$t`. `$t` must be a
-/// union type, or else `union_has_padding!`'s result may be meaningless.
+/// `$ts` is the list of the type of every field in `$t`. `$t` must be a union
+/// type, or else `union_padding!`'s result may be meaningless.
 ///
-/// Note that `union_has_padding!`'s results are independent of `repr` since
-/// they only consider the size of the type and the sizes of the fields.
-/// Whatever the repr, the size of the type already takes into account any
-/// padding that the compiler has decided to add. Unions with well-defined
-/// representations (such as `repr(C)`) can use this macro to check for padding.
-/// Note that while this may yield some consistent value for some `repr(Rust)`
-/// unions, it is not guaranteed across platforms or compilations.
+/// Note that `union_padding!`'s results are independent of `repr` since they
+/// only consider the size of the type and the sizes of the fields. Whatever the
+/// repr, the size of the type already takes into account any padding that the
+/// compiler has decided to add. Unions with well-defined representations (such
+/// as `repr(C)`) can use this macro to check for padding. Note that while this
+/// may yield some consistent value for some `repr(Rust)` unions, it is not
+/// guaranteed across platforms or compilations.
 #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
 #[macro_export]
-macro_rules! union_has_padding {
-    ($t:ty, [$($ts:ty),*]) => {
-        false $(|| $crate::util::macro_util::size_of::<$t>() != $crate::util::macro_util::size_of::<$ts>())*
-    };
+macro_rules! union_padding {
+    ($t:ty, $_align:expr, $_packed:expr, [$($ts:ty),*]) => {{
+        // The `align` and `packed` directives can be ignored here. Regardless
+        // of if and how they are set, comparing the size of `$t` to each of its
+        // field sizes is a reliable indicator of the presence of padding.
+        let mut max = 0;
+        $({
+            let padding = $crate::util::macro_util::size_of::<$t>() - $crate::util::macro_util::size_of::<$ts>();
+            if padding > max {
+                max = padding;
+            }
+        })*
+        max
+    }};
 }
 
-/// Does the enum type `$t` have padding?
+/// How many padding bytes does the enum type `$t` have?
 ///
 /// `$disc` is the type of the enum tag, and `$ts` is a list of fields in each
 /// square-bracket-delimited variant. `$t` must be an enum, or else
-/// `enum_has_padding!`'s result may be meaningless. An enum has padding if any
-/// of its variant structs [1][2] contain padding, and so all of the variants of
-/// an enum must be "full" in order for the enum to not have padding.
+/// `enum_padding!`'s result may be meaningless. An enum has padding if any of
+/// its variant structs [1][2] contain padding, and so all of the variants of an
+/// enum must be "full" in order for the enum to not have padding.
 ///
-/// The results of `enum_has_padding!` require that the enum is not
-/// `repr(Rust)`, as `repr(Rust)` enums may niche the enum's tag and reduce the
-/// total number of bytes required to represent the enum as a result. As long as
-/// the enum is `repr(C)`, `repr(int)`, or `repr(C, int)`, this will
-/// consistently return whether the enum contains any padding bytes.
+/// The results of `enum_padding!` require that the enum is not `repr(Rust)`, as
+/// `repr(Rust)` enums may niche the enum's tag and reduce the total number of
+/// bytes required to represent the enum as a result. As long as the enum is
+/// `repr(C)`, `repr(int)`, or `repr(C, int)`, this will consistently return
+/// whether the enum contains any padding bytes.
 ///
 /// [1]: https://doc.rust-lang.org/1.81.0/reference/type-layout.html#reprc-enums-with-fields
 /// [2]: https://doc.rust-lang.org/1.81.0/reference/type-layout.html#primitive-representation-of-enums-with-fields
 #[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
 #[macro_export]
-macro_rules! enum_has_padding {
-    ($t:ty, $disc:ty, $([$($ts:ty),*]),*) => {
-        false $(
-            || $crate::util::macro_util::size_of::<$t>()
-                != (
+macro_rules! enum_padding {
+    ($t:ty, $_align:expr, $packed:expr, $disc:ty, $([$($ts:ty),*]),*) => {{
+        // The `align` and `packed` directives are irrelevant. `$align` can be
+        // ignored because regardless of if and how it is set, comparing the
+        // size of `$t` to each of its field sizes is a reliable indicator of
+        // the presence of padding. `$packed` is irrelevant because it is
+        // forbidden on enums.
+        #[allow(clippy::as_conversions)]
+        const _: [(); 1] = [(); $packed.is_none() as usize];
+        let mut max = 0;
+        $({
+            let padding = $crate::util::macro_util::size_of::<$t>()
+                - (
                     $crate::util::macro_util::size_of::<$disc>()
                     $(+ $crate::util::macro_util::size_of::<$ts>())*
-                )
-        )*
-    }
-}
-
-/// Does `t` have alignment greater than or equal to `u`?  If not, this macro
-/// produces a compile error. It must be invoked in a dead codepath. This is
-/// used in `transmute_ref!` and `transmute_mut!`.
-#[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
-#[macro_export]
-macro_rules! assert_align_gt_eq {
-    ($t:ident, $u: ident) => {{
-        // The comments here should be read in the context of this macro's
-        // invocations in `transmute_ref!` and `transmute_mut!`.
-        if false {
-            // The type wildcard in this bound is inferred to be `T` because
-            // `align_of.into_t()` is assigned to `t` (which has type `T`).
-            let align_of: $crate::util::macro_util::AlignOf<_> = unreachable!();
-            $t = align_of.into_t();
-            // `max_aligns` is inferred to have type `MaxAlignsOf<T, U>` because
-            // of the inferred types of `t` and `u`.
-            let mut max_aligns = $crate::util::macro_util::MaxAlignsOf::new($t, $u);
-
-            // This transmute will only compile successfully if
-            // `align_of::<T>() == max(align_of::<T>(), align_of::<U>())` - in
-            // other words, if `align_of::<T>() >= align_of::<U>()`.
-            //
-            // SAFETY: This code is never run.
-            max_aligns = unsafe {
-                // Clippy: We can't annotate the types; this macro is designed
-                // to infer the types from the calling context.
-                #[allow(clippy::missing_transmute_annotations)]
-                $crate::util::macro_util::core_reexport::mem::transmute(align_of)
-            };
-        } else {
-            loop {}
-        }
+                );
+            if padding > max {
+                max = padding;
+            }
+        })*
+        max
     }};
 }
 
-/// Do `t` and `u` have the same size?  If not, this macro produces a compile
-/// error. It must be invoked in a dead codepath. This is used in
-/// `transmute_ref!` and `transmute_mut!`.
-#[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
-#[macro_export]
-macro_rules! assert_size_eq {
-    ($t:ident, $u: ident) => {{
-        // The comments here should be read in the context of this macro's
-        // invocations in `transmute_ref!` and `transmute_mut!`.
-        if false {
-            // SAFETY: This code is never run.
-            $u = unsafe {
-                // Clippy:
-                // - It's okay to transmute a type to itself.
-                // - We can't annotate the types; this macro is designed to
-                //   infer the types from the calling context.
-                #[allow(clippy::useless_transmute, clippy::missing_transmute_annotations)]
-                $crate::util::macro_util::core_reexport::mem::transmute($t)
-            };
-        } else {
-            loop {}
-        }
-    }};
-}
-
-/// Transmutes a reference of one type to a reference of another type.
-///
-/// # Safety
-///
-/// The caller must guarantee that:
-/// - `Src: IntoBytes + Immutable`
-/// - `Dst: FromBytes + Immutable`
-/// - `size_of::<Src>() == size_of::<Dst>()`
-/// - `align_of::<Src>() >= align_of::<Dst>()`
-#[inline(always)]
-pub const unsafe fn transmute_ref<'dst, 'src: 'dst, Src: 'src, Dst: 'dst>(
-    src: &'src Src,
-) -> &'dst Dst {
-    let src: *const Src = src;
-    let dst = src.cast::<Dst>();
-    // SAFETY:
-    // - We know that it is sound to view the target type of the input reference
-    //   (`Src`) as the target type of the output reference (`Dst`) because the
-    //   caller has guaranteed that `Src: IntoBytes`, `Dst: FromBytes`, and
-    //   `size_of::<Src>() == size_of::<Dst>()`.
-    // - We know that there are no `UnsafeCell`s, and thus we don't have to
-    //   worry about `UnsafeCell` overlap, because `Src: Immutable` and `Dst:
-    //   Immutable`.
-    // - The caller has guaranteed that alignment is not increased.
-    // - We know that the returned lifetime will not outlive the input lifetime
-    //   thanks to the lifetime bounds on this function.
-    //
-    // TODO(#67): Once our MSRV is 1.58, replace this `transmute` with `&*dst`.
-    #[allow(clippy::transmute_ptr_to_ref)]
-    unsafe {
-        mem::transmute(dst)
-    }
-}
-
-/// Transmutes a mutable reference of one type to a mutable reference of another
-/// type.
-///
-/// # Safety
-///
-/// The caller must guarantee that:
-/// - `Src: FromBytes + IntoBytes`
-/// - `Dst: FromBytes + IntoBytes`
-/// - `size_of::<Src>() == size_of::<Dst>()`
-/// - `align_of::<Src>() >= align_of::<Dst>()`
-// TODO(#686): Consider removing the `Immutable` requirement.
-#[inline(always)]
-pub unsafe fn transmute_mut<'dst, 'src: 'dst, Src: 'src, Dst: 'dst>(
-    src: &'src mut Src,
-) -> &'dst mut Dst {
-    let src: *mut Src = src;
-    let dst = src.cast::<Dst>();
-    // SAFETY:
-    // - We know that it is sound to view the target type of the input reference
-    //   (`Src`) as the target type of the output reference (`Dst`) and
-    //   vice-versa because the caller has guaranteed that `Src: FromBytes +
-    //   IntoBytes`, `Dst: FromBytes + IntoBytes`, and `size_of::<Src>() ==
-    //   size_of::<Dst>()`.
-    // - The caller has guaranteed that alignment is not increased.
-    // - We know that the returned lifetime will not outlive the input lifetime
-    //   thanks to the lifetime bounds on this function.
-    unsafe { &mut *dst }
-}
-
-/// Is a given source a valid instance of `Dst`?
-///
-/// If so, returns `src` casted to a `Ptr<Dst, _>`. Otherwise returns `None`.
-///
-/// # Safety
-///
-/// Unsafe code may assume that, if `try_cast_or_pme(src)` returns `Ok`,
-/// `*src` is a bit-valid instance of `Dst`, and that the size of `Src` is
-/// greater than or equal to the size of `Dst`.
-///
-/// Unsafe code may assume that, if `try_cast_or_pme(src)` returns `Err`, the
-/// encapsulated `Ptr` value is the original `src`. `try_cast_or_pme` cannot
-/// guarantee that the referent has not been modified, as it calls user-defined
-/// code (`TryFromBytes::is_bit_valid`).
-///
-/// # Panics
-///
-/// `try_cast_or_pme` may either produce a post-monomorphization error or a
-/// panic if `Dst` not the same size as `Src`. Otherwise, `try_cast_or_pme`
-/// panics under the same circumstances as [`is_bit_valid`].
-///
-/// [`is_bit_valid`]: TryFromBytes::is_bit_valid
+/// Unwraps an infallible `Result`.
 #[doc(hidden)]
-#[inline]
-fn try_cast_or_pme<Src, Dst, I, R, S>(
-    src: Ptr<'_, Src, I>,
-) -> Result<
-    Ptr<'_, Dst, (I::Aliasing, invariant::Unaligned, invariant::Valid)>,
-    ValidityError<Ptr<'_, Src, I>, Dst>,
->
-where
-    // TODO(#2226): There should be a `Src: FromBytes` bound here, but doing so
-    // requires deeper surgery.
-    Src: invariant::Read<I::Aliasing, R>,
-    Dst: TryFromBytes
-        + invariant::Read<I::Aliasing, R>
-        + TryTransmuteFromPtr<Dst, I::Aliasing, invariant::Initialized, invariant::Valid, S>,
-    I: Invariants<Validity = invariant::Initialized>,
-    I::Aliasing: invariant::Reference,
-{
-    static_assert!(Src, Dst => mem::size_of::<Dst>() == mem::size_of::<Src>());
-
-    // SAFETY: This is a pointer cast, satisfying the following properties:
-    // - `p as *mut Dst` addresses a subset of the `bytes` addressed by `src`,
-    //   because we assert above that the size of `Dst` equal to the size of
-    //   `Src`.
-    // - `p as *mut Dst` is a provenance-preserving cast
-    #[allow(clippy::as_conversions)]
-    let c_ptr = unsafe { src.cast_unsized(NonNull::cast::<Dst>) };
-
-    match c_ptr.try_into_valid() {
-        Ok(ptr) => Ok(ptr),
-        Err(err) => {
-            // Re-cast `Ptr<Dst>` to `Ptr<Src>`.
-            let ptr = err.into_src();
-            // SAFETY: This is a pointer cast, satisfying the following
-            // properties:
-            // - `p as *mut Src` addresses a subset of the `bytes` addressed by
-            //   `ptr`, because we assert above that the size of `Dst` is equal
-            //   to the size of `Src`.
-            // - `p as *mut Src` is a provenance-preserving cast
-            #[allow(clippy::as_conversions)]
-            let ptr = unsafe { ptr.cast_unsized(NonNull::cast::<Src>) };
-            // SAFETY: `ptr` is `src`, and has the same alignment invariant.
-            let ptr = unsafe { ptr.assume_alignment::<I::Alignment>() };
-            // SAFETY: `ptr` is `src` and has the same validity invariant.
-            let ptr = unsafe { ptr.assume_validity::<I::Validity>() };
-            Err(ValidityError::new(ptr.unify_invariants()))
+#[macro_export]
+macro_rules! into_inner {
+    ($e:expr) => {
+        match $e {
+            $crate::util::macro_util::core_reexport::result::Result::Ok(e) => e,
+            $crate::util::macro_util::core_reexport::result::Result::Err(i) => match i {},
         }
+    };
+}
+
+/// Translates an identifier or tuple index into a numeric identifier.
+#[doc(hidden)] // `#[macro_export]` bypasses this module's `#[doc(hidden)]`.
+#[macro_export]
+macro_rules! ident_id {
+    ($field:ident) => {
+        $crate::util::macro_util::hash_name(stringify!($field))
+    };
+    ($field:literal) => {
+        $field
+    };
+}
+
+/// Computes the hash of a string.
+///
+/// NOTE(#2749) on hash collisions: This function's output only needs to be
+/// deterministic within a particular compilation. Thus, if a user ever reports
+/// a hash collision (very unlikely given the <= 16-byte special case), we can
+/// strengthen the hash function at that point and publish a new version. Since
+/// this is computed at compile time on small strings, we can easily use more
+/// expensive and higher-quality hash functions if need be.
+#[inline(always)]
+#[must_use]
+#[allow(clippy::as_conversions, clippy::indexing_slicing, clippy::arithmetic_side_effects)]
+pub const fn hash_name(name: &str) -> i128 {
+    let name = name.as_bytes();
+
+    // We guarantee freedom from hash collisions between any two strings of
+    // length 16 or less by having the hashes of such strings be equal to
+    // their value. There is still a possibility that such strings will have
+    // the same value as the hash of a string of length > 16.
+    if name.len() <= size_of::<u128>() {
+        let mut bytes = [0u8; 16];
+
+        let mut i = 0;
+        while i < name.len() {
+            bytes[i] = name[i];
+            i += 1;
+        }
+
+        return i128::from_ne_bytes(bytes);
+    };
+
+    // An implementation of FxHasher, although returning a u128. Probably
+    // not as strong as it could be, but probably more collision resistant
+    // than normal 64-bit FxHasher.
+    let mut hash = 0u128;
+    let mut i = 0;
+    while i < name.len() {
+        // This is just FxHasher's `0x517cc1b727220a95` constant
+        // concatenated back-to-back.
+        const K: u128 = 0x517cc1b727220a95517cc1b727220a95;
+        hash = (hash.rotate_left(5) ^ (name[i] as u128)).wrapping_mul(K);
+        i += 1;
     }
+    i128::from_ne_bytes(hash.to_ne_bytes())
 }
 
 /// Attempts to transmute `Src` into `Dst`.
@@ -626,116 +530,399 @@ where
     static_assert!(Src, Dst => mem::size_of::<Dst>() == mem::size_of::<Src>());
 
     let mu_src = mem::MaybeUninit::new(src);
-    // SAFETY: By invariant on `&`, the following are satisfied:
-    // - `&mu_src` is valid for reads
-    // - `&mu_src` is properly aligned
-    // - `&mu_src`'s referent is bit-valid
-    let mu_src_copy = unsafe { core::ptr::read(&mu_src) };
-    // SAFETY: `MaybeUninit` has no validity constraints.
-    let mut mu_dst: mem::MaybeUninit<Dst> =
-        unsafe { crate::util::transmute_unchecked(mu_src_copy) };
+    // SAFETY: `MaybeUninit` has no validity requirements.
+    let mu_dst: mem::MaybeUninit<ReadOnly<Dst>> =
+        unsafe { crate::util::transmute_unchecked(mu_src) };
 
-    let ptr = Ptr::from_mut(&mut mu_dst);
+    let ptr = Ptr::from_ref(&mu_dst);
 
     // SAFETY: Since `Src: IntoBytes`, and since `size_of::<Src>() ==
     // size_of::<Dst>()` by the preceding assertion, all of `mu_dst`'s bytes are
-    // initialized.
-    let ptr = unsafe { ptr.assume_validity::<invariant::Initialized>() };
-
-    // SAFETY: `MaybeUninit<T>` and `T` have the same size [1], so this cast
-    // preserves the referent's size. This cast preserves provenance.
-    //
-    // [1] Per https://doc.rust-lang.org/1.81.0/std/mem/union.MaybeUninit.html#layout-1:
-    //
-    //   `MaybeUninit<T>` is guaranteed to have the same size, alignment, and
-    //   ABI as `T`
-    let ptr: Ptr<'_, Dst, _> = unsafe { ptr.cast_unsized(NonNull::<mem::MaybeUninit<Dst>>::cast) };
-
-    if Dst::is_bit_valid(ptr.forget_aligned()) {
+    // initialized. `MaybeUninit` has no validity requirements, so even if
+    // `ptr` is used to mutate its referent (which it actually can't be - it's
+    // a shared `ReadOnly` pointer), that won't violate its referent's validity.
+    let ptr = unsafe { ptr.assume_validity::<Initialized>() };
+    if Dst::is_bit_valid(ptr.cast::<_, CastSized, _>()) {
         // SAFETY: Since `Dst::is_bit_valid`, we know that `ptr`'s referent is
         // bit-valid for `Dst`. `ptr` points to `mu_dst`, and no intervening
         // operations have mutated it, so it is a bit-valid `Dst`.
-        Ok(unsafe { mu_dst.assume_init() })
+        Ok(ReadOnly::into_inner(unsafe { mu_dst.assume_init() }))
     } else {
-        // SAFETY: `mu_src` was constructed from `src` and never modified, so it
-        // is still bit-valid.
+        // SAFETY: `MaybeUninit` has no validity requirements.
+        let mu_src: mem::MaybeUninit<Src> = unsafe { crate::util::transmute_unchecked(mu_dst) };
+        // SAFETY: `mu_dst`/`mu_src` was constructed from `src` and never
+        // modified, so it is still bit-valid.
         Err(ValidityError::new(unsafe { mu_src.assume_init() }))
     }
 }
 
-/// Attempts to transmute `&Src` into `&Dst`.
-///
-/// A helper for `try_transmute_ref!`.
-///
-/// # Panics
-///
-/// `try_transmute_ref` may either produce a post-monomorphization error or a
-/// panic if `Dst` is bigger or has a stricter alignment requirement than `Src`.
-/// Otherwise, `try_transmute_ref` panics under the same circumstances as
-/// [`is_bit_valid`].
-///
-/// [`is_bit_valid`]: TryFromBytes::is_bit_valid
-#[inline(always)]
-pub fn try_transmute_ref<Src, Dst>(src: &Src) -> Result<&Dst, ValidityError<&Src, Dst>>
+/// See `try_transmute_ref!` documentation.
+pub trait TryTransmuteRefDst<'a> {
+    type Dst: ?Sized;
+
+    /// See `try_transmute_ref!` documentation.
+    fn try_transmute_ref(self) -> Result<&'a Self::Dst, ValidityError<&'a Self::Src, Self::Dst>>
+    where
+        Self: TryTransmuteRefSrc<'a>,
+        Self::Src: IntoBytes + Immutable + KnownLayout,
+        Self::Dst: TryFromBytes + Immutable + KnownLayout;
+}
+
+pub trait TryTransmuteRefSrc<'a> {
+    type Src: ?Sized;
+}
+
+impl<'a, Src, Dst> TryTransmuteRefSrc<'a> for Wrap<&'a Src, &'a Dst>
 where
-    Src: IntoBytes + Immutable,
-    Dst: TryFromBytes + Immutable,
+    Src: ?Sized,
+    Dst: ?Sized,
 {
-    let ptr = Ptr::from_ref(src);
-    let ptr = ptr.bikeshed_recall_initialized_immutable();
-    match try_cast_or_pme::<Src, Dst, _, BecauseImmutable, _>(ptr) {
-        Ok(ptr) => {
-            static_assert!(Src, Dst => mem::align_of::<Dst>() <= mem::align_of::<Src>());
-            // SAFETY: We have checked that `Dst` does not have a stricter
-            // alignment requirement than `Src`.
-            let ptr = unsafe { ptr.assume_alignment::<invariant::Aligned>() };
-            Ok(ptr.as_ref())
+    type Src = Src;
+}
+
+impl<'a, Src, Dst> TryTransmuteRefDst<'a> for Wrap<&'a Src, &'a Dst>
+where
+    Src: IntoBytes + Immutable + KnownLayout + ?Sized,
+    Dst: TryFromBytes + Immutable + KnownLayout + ?Sized,
+{
+    type Dst = Dst;
+
+    #[inline(always)]
+    fn try_transmute_ref(
+        self,
+    ) -> Result<
+        &'a Dst,
+        ValidityError<&'a <Wrap<&'a Src, &'a Dst> as TryTransmuteRefSrc<'a>>::Src, Dst>,
+    > {
+        let ptr = Ptr::from_ref(self.0);
+        #[rustfmt::skip]
+        let res = ptr.try_with(#[inline(always)] |ptr| {
+            let ptr = ptr.recall_validity::<Initialized, _>();
+            let ptr = ptr.cast::<_, crate::layout::CastFrom<Dst>, _>();
+            ptr.try_into_valid()
+        });
+        match res {
+            Ok(ptr) => {
+                static_assert!(Src: ?Sized + KnownLayout, Dst: ?Sized + KnownLayout => {
+                    Src::LAYOUT.align.get() >= Dst::LAYOUT.align.get()
+                }, "cannot transmute reference when destination type has higher alignment than source type");
+                // SAFETY: We have checked that `Dst` does not have a stricter
+                // alignment requirement than `Src`.
+                let ptr = unsafe { ptr.assume_alignment::<Aligned>() };
+                Ok(ptr.as_ref())
+            }
+            Err(err) => Err(err.map_src(Ptr::as_ref)),
         }
-        Err(err) => Err(err.map_src(|ptr| {
-            // SAFETY: Because `Src: Immutable` and we create a `Ptr` via
-            // `Ptr::from_ref`, the resulting `Ptr` is a shared-and-`Immutable`
-            // `Ptr`, which does not permit mutation of its referent. Therefore,
-            // no mutation could have happened during the call to
-            // `try_cast_or_pme` (any such mutation would be unsound).
-            //
-            // `try_cast_or_pme` promises to return its original argument, and
-            // so we know that we are getting back the same `ptr` that we
-            // originally passed, and that `ptr` was a bit-valid `Src`.
-            let ptr = unsafe { ptr.assume_valid() };
-            ptr.as_ref()
-        })),
     }
 }
 
-/// Attempts to transmute `&mut Src` into `&mut Dst`.
-///
-/// A helper for `try_transmute_mut!`.
-///
-/// # Panics
-///
-/// `try_transmute_mut` may either produce a post-monomorphization error or a
-/// panic if `Dst` is bigger or has a stricter alignment requirement than `Src`.
-/// Otherwise, `try_transmute_mut` panics under the same circumstances as
-/// [`is_bit_valid`].
-///
-/// [`is_bit_valid`]: TryFromBytes::is_bit_valid
-#[inline(always)]
-pub fn try_transmute_mut<Src, Dst>(src: &mut Src) -> Result<&mut Dst, ValidityError<&mut Src, Dst>>
+pub trait TryTransmuteMutDst<'a> {
+    type Dst: ?Sized;
+
+    /// See `try_transmute_mut!` documentation.
+    fn try_transmute_mut(
+        self,
+    ) -> Result<&'a mut Self::Dst, ValidityError<&'a mut Self::Src, Self::Dst>>
+    where
+        Self: TryTransmuteMutSrc<'a>,
+        Self::Src: IntoBytes,
+        Self::Dst: TryFromBytes;
+}
+
+pub trait TryTransmuteMutSrc<'a> {
+    type Src: ?Sized;
+}
+
+impl<'a, Src, Dst> TryTransmuteMutSrc<'a> for Wrap<&'a mut Src, &'a mut Dst>
 where
-    Src: FromBytes + IntoBytes,
-    Dst: TryFromBytes + IntoBytes,
+    Src: ?Sized,
+    Dst: ?Sized,
 {
-    let ptr = Ptr::from_mut(src);
-    let ptr = ptr.bikeshed_recall_initialized_from_bytes();
-    match try_cast_or_pme::<Src, Dst, _, BecauseExclusive, _>(ptr) {
-        Ok(ptr) => {
-            static_assert!(Src, Dst => mem::align_of::<Dst>() <= mem::align_of::<Src>());
-            // SAFETY: We have checked that `Dst` does not have a stricter
-            // alignment requirement than `Src`.
-            let ptr = unsafe { ptr.assume_alignment::<invariant::Aligned>() };
-            Ok(ptr.as_mut())
+    type Src = Src;
+}
+
+impl<'a, Src, Dst> TryTransmuteMutDst<'a> for Wrap<&'a mut Src, &'a mut Dst>
+where
+    Src: FromBytes + IntoBytes + KnownLayout + ?Sized,
+    Dst: TryFromBytes + IntoBytes + KnownLayout + ?Sized,
+{
+    type Dst = Dst;
+
+    #[inline(always)]
+    fn try_transmute_mut(
+        self,
+    ) -> Result<
+        &'a mut Dst,
+        ValidityError<&'a mut <Wrap<&'a mut Src, &'a mut Dst> as TryTransmuteMutSrc<'a>>::Src, Dst>,
+    > {
+        let ptr = Ptr::from_mut(self.0);
+        // SAFETY: The provided closure returns the only copy of `ptr`.
+        #[rustfmt::skip]
+        let res = unsafe {
+            ptr.try_with_unchecked(#[inline(always)] |ptr| {
+                let ptr = ptr.recall_validity::<Initialized, (_, (_, _))>();
+                let ptr = ptr.cast::<_, crate::layout::CastFrom<Dst>, _>();
+                ptr.try_into_valid()
+            })
+        };
+        match res {
+            Ok(ptr) => {
+                static_assert!(Src: ?Sized + KnownLayout, Dst: ?Sized + KnownLayout => {
+                    Src::LAYOUT.align.get() >= Dst::LAYOUT.align.get()
+                }, "cannot transmute reference when destination type has higher alignment than source type");
+                // SAFETY: We have checked that `Dst` does not have a stricter
+                // alignment requirement than `Src`.
+                let ptr = unsafe { ptr.assume_alignment::<Aligned>() };
+                Ok(ptr.as_mut())
+            }
+            Err(err) => Err(err.map_src(Ptr::as_mut)),
         }
-        Err(err) => Err(err.map_src(|ptr| ptr.recall_validity().as_mut())),
+    }
+}
+
+// Used in `transmute_ref!` and friends.
+//
+// This permits us to use the autoref specialization trick to dispatch to
+// associated functions for `transmute_ref` and `transmute_mut` when both `Src`
+// and `Dst` are `Sized`, and to trait methods otherwise. The associated
+// functions, unlike the trait methods, do not require a `KnownLayout` bound.
+// This permits us to add support for transmuting references to unsized types
+// without breaking backwards-compatibility (on v0.8.x) with the old
+// implementation, which did not require a `KnownLayout` bound to transmute
+// sized types.
+#[derive(Copy, Clone)]
+pub struct Wrap<Src, Dst>(pub Src, pub PhantomData<Dst>);
+
+impl<Src, Dst> Wrap<Src, Dst> {
+    #[inline(always)]
+    pub const fn new(src: Src) -> Self {
+        Wrap(src, PhantomData)
+    }
+}
+
+impl<'a, Src, Dst> Wrap<&'a Src, &'a Dst>
+where
+    Src: ?Sized,
+    Dst: ?Sized,
+{
+    #[allow(clippy::must_use_candidate, clippy::missing_inline_in_public_items, clippy::empty_loop)]
+    pub const fn transmute_ref_inference_helper(self) -> &'a Dst {
+        loop {}
+    }
+}
+
+impl<'a, Src, Dst> Wrap<&'a Src, &'a Dst> {
+    /// # Safety
+    /// The caller must guarantee that:
+    /// - `Src: IntoBytes + Immutable`
+    /// - `Dst: FromBytes + Immutable`
+    ///
+    /// # PME
+    ///
+    /// Instantiating this method PMEs unless both:
+    /// - `mem::size_of::<Dst>() == mem::size_of::<Src>()`
+    /// - `mem::align_of::<Dst>() <= mem::align_of::<Src>()`
+    #[inline(always)]
+    #[must_use]
+    pub const unsafe fn transmute_ref(self) -> &'a Dst {
+        static_assert!(Src, Dst => mem::size_of::<Dst>() == mem::size_of::<Src>());
+        static_assert!(Src, Dst => mem::align_of::<Dst>() <= mem::align_of::<Src>());
+
+        let src: *const Src = self.0;
+        let dst = src.cast::<Dst>();
+        // SAFETY:
+        // - We know that it is sound to view the target type of the input
+        //   reference (`Src`) as the target type of the output reference
+        //   (`Dst`) because the caller has guaranteed that `Src: IntoBytes`,
+        //   `Dst: FromBytes`, and `size_of::<Src>() == size_of::<Dst>()`.
+        // - We know that there are no `UnsafeCell`s, and thus we don't have to
+        //   worry about `UnsafeCell` overlap, because `Src: Immutable` and
+        //   `Dst: Immutable`.
+        // - The caller has guaranteed that alignment is not increased.
+        // - We know that the returned lifetime will not outlive the input
+        //   lifetime thanks to the lifetime bounds on this function.
+        //
+        // FIXME(#67): Once our MSRV is 1.58, replace this `transmute` with
+        // `&*dst`.
+        #[allow(clippy::transmute_ptr_to_ref)]
+        unsafe {
+            mem::transmute(dst)
+        }
+    }
+
+    #[inline(always)]
+    pub fn try_transmute_ref(self) -> Result<&'a Dst, ValidityError<&'a Src, Dst>>
+    where
+        Src: IntoBytes + Immutable,
+        Dst: TryFromBytes + Immutable,
+    {
+        static_assert!(Src => mem::align_of::<Src>() == mem::align_of::<Wrapping<Src>>());
+        static_assert!(Dst => mem::align_of::<Dst>() == mem::align_of::<Wrapping<Dst>>());
+
+        // SAFETY: By the preceding assert, `Src` and `Wrapping<Src>` have the
+        // same alignment.
+        let src: &Wrapping<Src> =
+            unsafe { crate::util::transmute_ref::<_, _, BecauseImmutable>(self.0) };
+        let src = Wrap::new(src);
+        <Wrap<&'a Wrapping<Src>, &'a Wrapping<Dst>> as TryTransmuteRefDst<'a>>::try_transmute_ref(
+            src,
+        )
+        .map(
+            // SAFETY: By the preceding assert, `Dst` and `Wrapping<Dst>` have
+            // the same alignment.
+            #[inline(always)]
+            |dst| unsafe { crate::util::transmute_ref::<_, _, BecauseImmutable>(dst) },
+        )
+        .map_err(
+            #[inline(always)]
+            |err| {
+                // SAFETY: By the preceding assert, `Src` and `Wrapping<Src>` have the
+                // same alignment.
+                ValidityError::new(unsafe {
+                    crate::util::transmute_ref::<_, _, BecauseImmutable>(err.into_src())
+                })
+            },
+        )
+    }
+}
+
+impl<'a, Src, Dst> Wrap<&'a mut Src, &'a mut Dst>
+where
+    Src: ?Sized,
+    Dst: ?Sized,
+{
+    #[allow(clippy::must_use_candidate, clippy::missing_inline_in_public_items, clippy::empty_loop)]
+    pub fn transmute_mut_inference_helper(self) -> &'a mut Dst {
+        loop {}
+    }
+}
+
+impl<'a, Src, Dst> Wrap<&'a mut Src, &'a mut Dst> {
+    /// Transmutes a mutable reference of one type to a mutable reference of
+    /// another type.
+    ///
+    /// # PME
+    ///
+    /// Instantiating this method PMEs unless both:
+    /// - `mem::size_of::<Dst>() == mem::size_of::<Src>()`
+    /// - `mem::align_of::<Dst>() <= mem::align_of::<Src>()`
+    #[inline(always)]
+    #[must_use]
+    pub fn transmute_mut(self) -> &'a mut Dst
+    where
+        Src: FromBytes + IntoBytes,
+        Dst: FromBytes + IntoBytes,
+    {
+        static_assert!(Src, Dst => mem::size_of::<Dst>() == mem::size_of::<Src>());
+        static_assert!(Src, Dst => mem::align_of::<Dst>() <= mem::align_of::<Src>());
+
+        let src: *mut Src = self.0;
+        let dst = src.cast::<Dst>();
+        // SAFETY:
+        // - We know that it is sound to view the target type of the input
+        //   reference (`Src`) as the target type of the output reference
+        //   (`Dst`) and vice-versa because `Src: FromBytes + IntoBytes`, `Dst:
+        //   FromBytes + IntoBytes`, and (as asserted above) `size_of::<Src>()
+        //   == size_of::<Dst>()`.
+        // - We asserted above that alignment will not increase.
+        // - We know that the returned lifetime will not outlive the input
+        //   lifetime thanks to the lifetime bounds on this function.
+        unsafe { &mut *dst }
+    }
+
+    #[inline(always)]
+    pub fn try_transmute_mut(self) -> Result<&'a mut Dst, ValidityError<&'a mut Src, Dst>>
+    where
+        Src: FromBytes + IntoBytes,
+        Dst: TryFromBytes + IntoBytes,
+    {
+        static_assert!(Src => mem::align_of::<Src>() == mem::align_of::<Wrapping<Src>>());
+        static_assert!(Dst => mem::align_of::<Dst>() == mem::align_of::<Wrapping<Dst>>());
+
+        // SAFETY: By the preceding assert, `Src` and `Wrapping<Src>` have the
+        // same alignment.
+        let src: &mut Wrapping<Src> =
+            unsafe { crate::util::transmute_mut::<_, _, (_, (_, _))>(self.0) };
+        let src = Wrap::new(src);
+        <Wrap<&'a mut Wrapping<Src>, &'a mut Wrapping<Dst>> as TryTransmuteMutDst<'a>>
+            ::try_transmute_mut(src)
+            // SAFETY: By the preceding assert, `Dst` and `Wrapping<Dst>` have the
+            // same alignment.
+            .map(|dst| unsafe { crate::util::transmute_mut::<_, _, (_, (_, _))>(dst) })
+            .map_err(|err| {
+                // SAFETY: By the preceding assert, `Src` and `Wrapping<Src>` have the
+                // same alignment.
+                ValidityError::new(unsafe {
+                    crate::util::transmute_mut::<_, _, (_, (_, _))>(err.into_src())
+                })
+            })
+    }
+}
+
+pub trait TransmuteRefDst<'a> {
+    type Dst: ?Sized;
+
+    #[must_use]
+    fn transmute_ref(self) -> &'a Self::Dst;
+}
+
+impl<'a, Src: ?Sized, Dst: ?Sized> TransmuteRefDst<'a> for Wrap<&'a Src, &'a Dst>
+where
+    Src: KnownLayout + IntoBytes + Immutable,
+    Dst: KnownLayout<PointerMetadata = usize> + FromBytes + Immutable,
+{
+    type Dst = Dst;
+
+    #[inline(always)]
+    fn transmute_ref(self) -> &'a Dst {
+        let ptr = Ptr::from_ref(self.0)
+            .recall_validity::<Initialized, _>()
+            .transmute_with::<Dst, Initialized, crate::layout::CastFrom<Dst>, (crate::pointer::BecauseMutationCompatible, _)>()
+            .recall_validity::<Valid, _>();
+
+        static_assert!(Src: ?Sized + KnownLayout, Dst: ?Sized + KnownLayout => {
+            Src::LAYOUT.align.get() >= Dst::LAYOUT.align.get()
+        }, "cannot transmute reference when destination type has higher alignment than source type");
+
+        // SAFETY: The preceding `static_assert!` ensures that
+        // `Src::LAYOUT.align >= Dst::LAYOUT.align`. Since `self` is
+        // validly-aligned for `Src`, it is also validly-aligned for `Dst`.
+        let ptr = unsafe { ptr.assume_alignment() };
+
+        ptr.as_ref()
+    }
+}
+
+pub trait TransmuteMutDst<'a> {
+    type Dst: ?Sized;
+    #[must_use]
+    fn transmute_mut(self) -> &'a mut Self::Dst;
+}
+
+impl<'a, Src: ?Sized, Dst: ?Sized> TransmuteMutDst<'a> for Wrap<&'a mut Src, &'a mut Dst>
+where
+    Src: KnownLayout + FromBytes + IntoBytes,
+    Dst: KnownLayout<PointerMetadata = usize> + FromBytes + IntoBytes,
+{
+    type Dst = Dst;
+
+    #[inline(always)]
+    fn transmute_mut(self) -> &'a mut Dst {
+        let ptr = Ptr::from_mut(self.0)
+            .recall_validity::<Initialized, (_, (_, _))>()
+            .transmute_with::<Dst, Initialized, crate::layout::CastFrom<Dst>, _>()
+            .recall_validity::<Valid, (_, (_, _))>();
+
+        static_assert!(Src: ?Sized + KnownLayout, Dst: ?Sized + KnownLayout => {
+            Src::LAYOUT.align.get() >= Dst::LAYOUT.align.get()
+        }, "cannot transmute reference when destination type has higher alignment than source type");
+
+        // SAFETY: The preceding `static_assert!` ensures that
+        // `Src::LAYOUT.align >= Dst::LAYOUT.align`. Since `self` is
+        // validly-aligned for `Src`, it is also validly-aligned for `Dst`.
+        let ptr = unsafe { ptr.assume_alignment() };
+
+        ptr.as_mut()
     }
 }
 
@@ -759,202 +946,183 @@ pub mod core_reexport {
     }
 }
 
+/// Projects `Self` to itself.
+///
+/// This is used by macros to have the compiler verify that two syntactically
+/// similar types actually resolve to the same type. The blanket implementation
+/// ensures that no other implementation can project a type to anything other
+/// than itself.
+#[doc(hidden)]
+pub trait Identity {
+    /// `Self`.
+    type Type: ?Sized;
+}
+
+impl<T: ?Sized> Identity for T {
+    type Type = T;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use core::num::NonZeroUsize;
+
     use crate::util::testutil::*;
 
-    #[test]
-    fn test_align_of() {
-        macro_rules! test {
-            ($ty:ty) => {
-                assert_eq!(mem::size_of::<AlignOf<$ty>>(), mem::align_of::<$ty>());
-            };
-        }
-
-        test!(());
-        test!(u8);
-        test!(AU64);
-        test!([AU64; 2]);
-    }
-
-    #[test]
-    fn test_max_aligns_of() {
-        macro_rules! test {
-            ($t:ty, $u:ty) => {
-                assert_eq!(
-                    mem::size_of::<MaxAlignsOf<$t, $u>>(),
-                    core::cmp::max(mem::align_of::<$t>(), mem::align_of::<$u>())
-                );
-            };
-        }
-
-        test!(u8, u8);
-        test!(u8, AU64);
-        test!(AU64, u8);
-    }
-
-    #[test]
-    fn test_typed_align_check() {
-        // Test that the type-based alignment check used in
-        // `assert_align_gt_eq!` behaves as expected.
-
-        macro_rules! assert_t_align_gteq_u_align {
-            ($t:ty, $u:ty, $gteq:expr) => {
-                assert_eq!(
-                    mem::size_of::<MaxAlignsOf<$t, $u>>() == mem::size_of::<AlignOf<$t>>(),
-                    $gteq
-                );
-            };
-        }
-
-        assert_t_align_gteq_u_align!(u8, u8, true);
-        assert_t_align_gteq_u_align!(AU64, AU64, true);
-        assert_t_align_gteq_u_align!(AU64, u8, true);
-        assert_t_align_gteq_u_align!(u8, AU64, false);
-    }
-
-    // TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove
-    // this `cfg` when `size_of_val_raw` is stabilized.
-    #[allow(clippy::decimal_literal_representation)]
     #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
-    #[test]
-    fn test_trailing_field_offset() {
-        assert_eq!(mem::align_of::<Aligned64kAllocation>(), _64K);
+    mod nightly {
+        use super::super::*;
+        use crate::util::testutil::*;
 
-        macro_rules! test {
-            (#[$cfg:meta] ($($ts:ty),* ; $trailing_field_ty:ty) => $expect:expr) => {{
-                #[$cfg]
-                struct Test($(#[allow(dead_code)] $ts,)* #[allow(dead_code)] $trailing_field_ty);
-                assert_eq!(test!(@offset $($ts),* ; $trailing_field_ty), $expect);
-            }};
-            (#[$cfg:meta] $(#[$cfgs:meta])* ($($ts:ty),* ; $trailing_field_ty:ty) => $expect:expr) => {
-                test!(#[$cfg] ($($ts),* ; $trailing_field_ty) => $expect);
-                test!($(#[$cfgs])* ($($ts),* ; $trailing_field_ty) => $expect);
-            };
-            (@offset ; $_trailing:ty) => { trailing_field_offset!(Test, 0) };
-            (@offset $_t:ty ; $_trailing:ty) => { trailing_field_offset!(Test, 1) };
+        // FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835):
+        // Remove this `cfg` when `size_of_val_raw` is stabilized.
+        #[allow(clippy::decimal_literal_representation)]
+        #[test]
+        fn test_trailing_field_offset() {
+            assert_eq!(mem::align_of::<Aligned64kAllocation>(), _64K);
+
+            macro_rules! test {
+                (#[$cfg:meta] ($($ts:ty),* ; $trailing_field_ty:ty) => $expect:expr) => {{
+                    #[$cfg]
+                    struct Test($(#[allow(dead_code)] $ts,)* #[allow(dead_code)] $trailing_field_ty);
+                    assert_eq!(test!(@offset $($ts),* ; $trailing_field_ty), $expect);
+                }};
+                (#[$cfg:meta] $(#[$cfgs:meta])* ($($ts:ty),* ; $trailing_field_ty:ty) => $expect:expr) => {
+                    test!(#[$cfg] ($($ts),* ; $trailing_field_ty) => $expect);
+                    test!($(#[$cfgs])* ($($ts),* ; $trailing_field_ty) => $expect);
+                };
+                (@offset ; $_trailing:ty) => { trailing_field_offset!(Test, 0) };
+                (@offset $_t:ty ; $_trailing:ty) => { trailing_field_offset!(Test, 1) };
+            }
+
+            test!(#[repr(C)] #[repr(transparent)] #[repr(packed)](; u8) => Some(0));
+            test!(#[repr(C)] #[repr(transparent)] #[repr(packed)](; [u8]) => Some(0));
+            test!(#[repr(C)] #[repr(C, packed)] (u8; u8) => Some(1));
+            test!(#[repr(C)] (; AU64) => Some(0));
+            test!(#[repr(C)] (; [AU64]) => Some(0));
+            test!(#[repr(C)] (u8; AU64) => Some(8));
+            test!(#[repr(C)] (u8; [AU64]) => Some(8));
+
+            #[derive(
+                Immutable, FromBytes, Eq, PartialEq, Ord, PartialOrd, Default, Debug, Copy, Clone,
+            )]
+            #[repr(C)]
+            pub(crate) struct Nested<T, U: ?Sized> {
+                _t: T,
+                _u: U,
+            }
+
+            test!(#[repr(C)] (; Nested<u8, AU64>) => Some(0));
+            test!(#[repr(C)] (; Nested<u8, [AU64]>) => Some(0));
+            test!(#[repr(C)] (u8; Nested<u8, AU64>) => Some(8));
+            test!(#[repr(C)] (u8; Nested<u8, [AU64]>) => Some(8));
+
+            // Test that `packed(N)` limits the offset of the trailing field.
+            test!(#[repr(C, packed(        1))] (u8; elain::Align<        2>) => Some(        1));
+            test!(#[repr(C, packed(        2))] (u8; elain::Align<        4>) => Some(        2));
+            test!(#[repr(C, packed(        4))] (u8; elain::Align<        8>) => Some(        4));
+            test!(#[repr(C, packed(        8))] (u8; elain::Align<       16>) => Some(        8));
+            test!(#[repr(C, packed(       16))] (u8; elain::Align<       32>) => Some(       16));
+            test!(#[repr(C, packed(       32))] (u8; elain::Align<       64>) => Some(       32));
+            test!(#[repr(C, packed(       64))] (u8; elain::Align<      128>) => Some(       64));
+            test!(#[repr(C, packed(      128))] (u8; elain::Align<      256>) => Some(      128));
+            test!(#[repr(C, packed(      256))] (u8; elain::Align<      512>) => Some(      256));
+            test!(#[repr(C, packed(      512))] (u8; elain::Align<     1024>) => Some(      512));
+            test!(#[repr(C, packed(     1024))] (u8; elain::Align<     2048>) => Some(     1024));
+            test!(#[repr(C, packed(     2048))] (u8; elain::Align<     4096>) => Some(     2048));
+            test!(#[repr(C, packed(     4096))] (u8; elain::Align<     8192>) => Some(     4096));
+            test!(#[repr(C, packed(     8192))] (u8; elain::Align<    16384>) => Some(     8192));
+            test!(#[repr(C, packed(    16384))] (u8; elain::Align<    32768>) => Some(    16384));
+            test!(#[repr(C, packed(    32768))] (u8; elain::Align<    65536>) => Some(    32768));
+            test!(#[repr(C, packed(    65536))] (u8; elain::Align<   131072>) => Some(    65536));
+            /* Alignments above 65536 are not yet supported.
+            test!(#[repr(C, packed(   131072))] (u8; elain::Align<   262144>) => Some(   131072));
+            test!(#[repr(C, packed(   262144))] (u8; elain::Align<   524288>) => Some(   262144));
+            test!(#[repr(C, packed(   524288))] (u8; elain::Align<  1048576>) => Some(   524288));
+            test!(#[repr(C, packed(  1048576))] (u8; elain::Align<  2097152>) => Some(  1048576));
+            test!(#[repr(C, packed(  2097152))] (u8; elain::Align<  4194304>) => Some(  2097152));
+            test!(#[repr(C, packed(  4194304))] (u8; elain::Align<  8388608>) => Some(  4194304));
+            test!(#[repr(C, packed(  8388608))] (u8; elain::Align< 16777216>) => Some(  8388608));
+            test!(#[repr(C, packed( 16777216))] (u8; elain::Align< 33554432>) => Some( 16777216));
+            test!(#[repr(C, packed( 33554432))] (u8; elain::Align< 67108864>) => Some( 33554432));
+            test!(#[repr(C, packed( 67108864))] (u8; elain::Align< 33554432>) => Some( 67108864));
+            test!(#[repr(C, packed( 33554432))] (u8; elain::Align<134217728>) => Some( 33554432));
+            test!(#[repr(C, packed(134217728))] (u8; elain::Align<268435456>) => Some(134217728));
+            test!(#[repr(C, packed(268435456))] (u8; elain::Align<268435456>) => Some(268435456));
+            */
+
+            // Test that `align(N)` does not limit the offset of the trailing field.
+            test!(#[repr(C, align(        1))] (u8; elain::Align<        2>) => Some(        2));
+            test!(#[repr(C, align(        2))] (u8; elain::Align<        4>) => Some(        4));
+            test!(#[repr(C, align(        4))] (u8; elain::Align<        8>) => Some(        8));
+            test!(#[repr(C, align(        8))] (u8; elain::Align<       16>) => Some(       16));
+            test!(#[repr(C, align(       16))] (u8; elain::Align<       32>) => Some(       32));
+            test!(#[repr(C, align(       32))] (u8; elain::Align<       64>) => Some(       64));
+            test!(#[repr(C, align(       64))] (u8; elain::Align<      128>) => Some(      128));
+            test!(#[repr(C, align(      128))] (u8; elain::Align<      256>) => Some(      256));
+            test!(#[repr(C, align(      256))] (u8; elain::Align<      512>) => Some(      512));
+            test!(#[repr(C, align(      512))] (u8; elain::Align<     1024>) => Some(     1024));
+            test!(#[repr(C, align(     1024))] (u8; elain::Align<     2048>) => Some(     2048));
+            test!(#[repr(C, align(     2048))] (u8; elain::Align<     4096>) => Some(     4096));
+            test!(#[repr(C, align(     4096))] (u8; elain::Align<     8192>) => Some(     8192));
+            test!(#[repr(C, align(     8192))] (u8; elain::Align<    16384>) => Some(    16384));
+            test!(#[repr(C, align(    16384))] (u8; elain::Align<    32768>) => Some(    32768));
+            test!(#[repr(C, align(    32768))] (u8; elain::Align<    65536>) => Some(    65536));
+            /* Alignments above 65536 are not yet supported.
+            test!(#[repr(C, align(    65536))] (u8; elain::Align<   131072>) => Some(   131072));
+            test!(#[repr(C, align(   131072))] (u8; elain::Align<   262144>) => Some(   262144));
+            test!(#[repr(C, align(   262144))] (u8; elain::Align<   524288>) => Some(   524288));
+            test!(#[repr(C, align(   524288))] (u8; elain::Align<  1048576>) => Some(  1048576));
+            test!(#[repr(C, align(  1048576))] (u8; elain::Align<  2097152>) => Some(  2097152));
+            test!(#[repr(C, align(  2097152))] (u8; elain::Align<  4194304>) => Some(  4194304));
+            test!(#[repr(C, align(  4194304))] (u8; elain::Align<  8388608>) => Some(  8388608));
+            test!(#[repr(C, align(  8388608))] (u8; elain::Align< 16777216>) => Some( 16777216));
+            test!(#[repr(C, align( 16777216))] (u8; elain::Align< 33554432>) => Some( 33554432));
+            test!(#[repr(C, align( 33554432))] (u8; elain::Align< 67108864>) => Some( 67108864));
+            test!(#[repr(C, align( 67108864))] (u8; elain::Align< 33554432>) => Some( 33554432));
+            test!(#[repr(C, align( 33554432))] (u8; elain::Align<134217728>) => Some(134217728));
+            test!(#[repr(C, align(134217728))] (u8; elain::Align<268435456>) => Some(268435456));
+            */
         }
 
-        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)](; u8) => Some(0));
-        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)](; [u8]) => Some(0));
-        test!(#[repr(C)] #[repr(C, packed)] (u8; u8) => Some(1));
-        test!(#[repr(C)] (; AU64) => Some(0));
-        test!(#[repr(C)] (; [AU64]) => Some(0));
-        test!(#[repr(C)] (u8; AU64) => Some(8));
-        test!(#[repr(C)] (u8; [AU64]) => Some(8));
-        test!(#[repr(C)] (; Nested<u8, AU64>) => Some(0));
-        test!(#[repr(C)] (; Nested<u8, [AU64]>) => Some(0));
-        test!(#[repr(C)] (u8; Nested<u8, AU64>) => Some(8));
-        test!(#[repr(C)] (u8; Nested<u8, [AU64]>) => Some(8));
-
-        // Test that `packed(N)` limits the offset of the trailing field.
-        test!(#[repr(C, packed(        1))] (u8; elain::Align<        2>) => Some(        1));
-        test!(#[repr(C, packed(        2))] (u8; elain::Align<        4>) => Some(        2));
-        test!(#[repr(C, packed(        4))] (u8; elain::Align<        8>) => Some(        4));
-        test!(#[repr(C, packed(        8))] (u8; elain::Align<       16>) => Some(        8));
-        test!(#[repr(C, packed(       16))] (u8; elain::Align<       32>) => Some(       16));
-        test!(#[repr(C, packed(       32))] (u8; elain::Align<       64>) => Some(       32));
-        test!(#[repr(C, packed(       64))] (u8; elain::Align<      128>) => Some(       64));
-        test!(#[repr(C, packed(      128))] (u8; elain::Align<      256>) => Some(      128));
-        test!(#[repr(C, packed(      256))] (u8; elain::Align<      512>) => Some(      256));
-        test!(#[repr(C, packed(      512))] (u8; elain::Align<     1024>) => Some(      512));
-        test!(#[repr(C, packed(     1024))] (u8; elain::Align<     2048>) => Some(     1024));
-        test!(#[repr(C, packed(     2048))] (u8; elain::Align<     4096>) => Some(     2048));
-        test!(#[repr(C, packed(     4096))] (u8; elain::Align<     8192>) => Some(     4096));
-        test!(#[repr(C, packed(     8192))] (u8; elain::Align<    16384>) => Some(     8192));
-        test!(#[repr(C, packed(    16384))] (u8; elain::Align<    32768>) => Some(    16384));
-        test!(#[repr(C, packed(    32768))] (u8; elain::Align<    65536>) => Some(    32768));
-        test!(#[repr(C, packed(    65536))] (u8; elain::Align<   131072>) => Some(    65536));
-        /* Alignments above 65536 are not yet supported.
-        test!(#[repr(C, packed(   131072))] (u8; elain::Align<   262144>) => Some(   131072));
-        test!(#[repr(C, packed(   262144))] (u8; elain::Align<   524288>) => Some(   262144));
-        test!(#[repr(C, packed(   524288))] (u8; elain::Align<  1048576>) => Some(   524288));
-        test!(#[repr(C, packed(  1048576))] (u8; elain::Align<  2097152>) => Some(  1048576));
-        test!(#[repr(C, packed(  2097152))] (u8; elain::Align<  4194304>) => Some(  2097152));
-        test!(#[repr(C, packed(  4194304))] (u8; elain::Align<  8388608>) => Some(  4194304));
-        test!(#[repr(C, packed(  8388608))] (u8; elain::Align< 16777216>) => Some(  8388608));
-        test!(#[repr(C, packed( 16777216))] (u8; elain::Align< 33554432>) => Some( 16777216));
-        test!(#[repr(C, packed( 33554432))] (u8; elain::Align< 67108864>) => Some( 33554432));
-        test!(#[repr(C, packed( 67108864))] (u8; elain::Align< 33554432>) => Some( 67108864));
-        test!(#[repr(C, packed( 33554432))] (u8; elain::Align<134217728>) => Some( 33554432));
-        test!(#[repr(C, packed(134217728))] (u8; elain::Align<268435456>) => Some(134217728));
-        test!(#[repr(C, packed(268435456))] (u8; elain::Align<268435456>) => Some(268435456));
-        */
-
-        // Test that `align(N)` does not limit the offset of the trailing field.
-        test!(#[repr(C, align(        1))] (u8; elain::Align<        2>) => Some(        2));
-        test!(#[repr(C, align(        2))] (u8; elain::Align<        4>) => Some(        4));
-        test!(#[repr(C, align(        4))] (u8; elain::Align<        8>) => Some(        8));
-        test!(#[repr(C, align(        8))] (u8; elain::Align<       16>) => Some(       16));
-        test!(#[repr(C, align(       16))] (u8; elain::Align<       32>) => Some(       32));
-        test!(#[repr(C, align(       32))] (u8; elain::Align<       64>) => Some(       64));
-        test!(#[repr(C, align(       64))] (u8; elain::Align<      128>) => Some(      128));
-        test!(#[repr(C, align(      128))] (u8; elain::Align<      256>) => Some(      256));
-        test!(#[repr(C, align(      256))] (u8; elain::Align<      512>) => Some(      512));
-        test!(#[repr(C, align(      512))] (u8; elain::Align<     1024>) => Some(     1024));
-        test!(#[repr(C, align(     1024))] (u8; elain::Align<     2048>) => Some(     2048));
-        test!(#[repr(C, align(     2048))] (u8; elain::Align<     4096>) => Some(     4096));
-        test!(#[repr(C, align(     4096))] (u8; elain::Align<     8192>) => Some(     8192));
-        test!(#[repr(C, align(     8192))] (u8; elain::Align<    16384>) => Some(    16384));
-        test!(#[repr(C, align(    16384))] (u8; elain::Align<    32768>) => Some(    32768));
-        test!(#[repr(C, align(    32768))] (u8; elain::Align<    65536>) => Some(    65536));
-        /* Alignments above 65536 are not yet supported.
-        test!(#[repr(C, align(    65536))] (u8; elain::Align<   131072>) => Some(   131072));
-        test!(#[repr(C, align(   131072))] (u8; elain::Align<   262144>) => Some(   262144));
-        test!(#[repr(C, align(   262144))] (u8; elain::Align<   524288>) => Some(   524288));
-        test!(#[repr(C, align(   524288))] (u8; elain::Align<  1048576>) => Some(  1048576));
-        test!(#[repr(C, align(  1048576))] (u8; elain::Align<  2097152>) => Some(  2097152));
-        test!(#[repr(C, align(  2097152))] (u8; elain::Align<  4194304>) => Some(  4194304));
-        test!(#[repr(C, align(  4194304))] (u8; elain::Align<  8388608>) => Some(  8388608));
-        test!(#[repr(C, align(  8388608))] (u8; elain::Align< 16777216>) => Some( 16777216));
-        test!(#[repr(C, align( 16777216))] (u8; elain::Align< 33554432>) => Some( 33554432));
-        test!(#[repr(C, align( 33554432))] (u8; elain::Align< 67108864>) => Some( 67108864));
-        test!(#[repr(C, align( 67108864))] (u8; elain::Align< 33554432>) => Some( 33554432));
-        test!(#[repr(C, align( 33554432))] (u8; elain::Align<134217728>) => Some(134217728));
-        test!(#[repr(C, align(134217728))] (u8; elain::Align<268435456>) => Some(268435456));
-        */
-    }
-
-    // TODO(#29), TODO(https://github.com/rust-lang/rust/issues/69835): Remove
-    // this `cfg` when `size_of_val_raw` is stabilized.
-    #[allow(clippy::decimal_literal_representation)]
-    #[cfg(__ZEROCOPY_INTERNAL_USE_ONLY_NIGHTLY_FEATURES_IN_TESTS)]
-    #[test]
-    fn test_align_of_dst() {
-        // Test that `align_of!` correctly computes the alignment of DSTs.
-        assert_eq!(align_of!([elain::Align<1>]), Some(1));
-        assert_eq!(align_of!([elain::Align<2>]), Some(2));
-        assert_eq!(align_of!([elain::Align<4>]), Some(4));
-        assert_eq!(align_of!([elain::Align<8>]), Some(8));
-        assert_eq!(align_of!([elain::Align<16>]), Some(16));
-        assert_eq!(align_of!([elain::Align<32>]), Some(32));
-        assert_eq!(align_of!([elain::Align<64>]), Some(64));
-        assert_eq!(align_of!([elain::Align<128>]), Some(128));
-        assert_eq!(align_of!([elain::Align<256>]), Some(256));
-        assert_eq!(align_of!([elain::Align<512>]), Some(512));
-        assert_eq!(align_of!([elain::Align<1024>]), Some(1024));
-        assert_eq!(align_of!([elain::Align<2048>]), Some(2048));
-        assert_eq!(align_of!([elain::Align<4096>]), Some(4096));
-        assert_eq!(align_of!([elain::Align<8192>]), Some(8192));
-        assert_eq!(align_of!([elain::Align<16384>]), Some(16384));
-        assert_eq!(align_of!([elain::Align<32768>]), Some(32768));
-        assert_eq!(align_of!([elain::Align<65536>]), Some(65536));
-        /* Alignments above 65536 are not yet supported.
-        assert_eq!(align_of!([elain::Align<131072>]), Some(131072));
-        assert_eq!(align_of!([elain::Align<262144>]), Some(262144));
-        assert_eq!(align_of!([elain::Align<524288>]), Some(524288));
-        assert_eq!(align_of!([elain::Align<1048576>]), Some(1048576));
-        assert_eq!(align_of!([elain::Align<2097152>]), Some(2097152));
-        assert_eq!(align_of!([elain::Align<4194304>]), Some(4194304));
-        assert_eq!(align_of!([elain::Align<8388608>]), Some(8388608));
-        assert_eq!(align_of!([elain::Align<16777216>]), Some(16777216));
-        assert_eq!(align_of!([elain::Align<33554432>]), Some(33554432));
-        assert_eq!(align_of!([elain::Align<67108864>]), Some(67108864));
-        assert_eq!(align_of!([elain::Align<33554432>]), Some(33554432));
-        assert_eq!(align_of!([elain::Align<134217728>]), Some(134217728));
-        assert_eq!(align_of!([elain::Align<268435456>]), Some(268435456));
-        */
+        // FIXME(#29), FIXME(https://github.com/rust-lang/rust/issues/69835):
+        // Remove this `cfg` when `size_of_val_raw` is stabilized.
+        #[allow(clippy::decimal_literal_representation)]
+        #[test]
+        fn test_align_of_dst() {
+            // Test that `align_of!` correctly computes the alignment of DSTs.
+            assert_eq!(align_of!([elain::Align<1>]), Some(1));
+            assert_eq!(align_of!([elain::Align<2>]), Some(2));
+            assert_eq!(align_of!([elain::Align<4>]), Some(4));
+            assert_eq!(align_of!([elain::Align<8>]), Some(8));
+            assert_eq!(align_of!([elain::Align<16>]), Some(16));
+            assert_eq!(align_of!([elain::Align<32>]), Some(32));
+            assert_eq!(align_of!([elain::Align<64>]), Some(64));
+            assert_eq!(align_of!([elain::Align<128>]), Some(128));
+            assert_eq!(align_of!([elain::Align<256>]), Some(256));
+            assert_eq!(align_of!([elain::Align<512>]), Some(512));
+            assert_eq!(align_of!([elain::Align<1024>]), Some(1024));
+            assert_eq!(align_of!([elain::Align<2048>]), Some(2048));
+            assert_eq!(align_of!([elain::Align<4096>]), Some(4096));
+            assert_eq!(align_of!([elain::Align<8192>]), Some(8192));
+            assert_eq!(align_of!([elain::Align<16384>]), Some(16384));
+            assert_eq!(align_of!([elain::Align<32768>]), Some(32768));
+            assert_eq!(align_of!([elain::Align<65536>]), Some(65536));
+            /* Alignments above 65536 are not yet supported.
+            assert_eq!(align_of!([elain::Align<131072>]), Some(131072));
+            assert_eq!(align_of!([elain::Align<262144>]), Some(262144));
+            assert_eq!(align_of!([elain::Align<524288>]), Some(524288));
+            assert_eq!(align_of!([elain::Align<1048576>]), Some(1048576));
+            assert_eq!(align_of!([elain::Align<2097152>]), Some(2097152));
+            assert_eq!(align_of!([elain::Align<4194304>]), Some(4194304));
+            assert_eq!(align_of!([elain::Align<8388608>]), Some(8388608));
+            assert_eq!(align_of!([elain::Align<16777216>]), Some(16777216));
+            assert_eq!(align_of!([elain::Align<33554432>]), Some(33554432));
+            assert_eq!(align_of!([elain::Align<67108864>]), Some(67108864));
+            assert_eq!(align_of!([elain::Align<33554432>]), Some(33554432));
+            assert_eq!(align_of!([elain::Align<134217728>]), Some(134217728));
+            assert_eq!(align_of!([elain::Align<268435456>]), Some(268435456));
+            */
+        }
     }
 
     #[test]
@@ -988,14 +1156,15 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_has_padding() {
-        // Test that, for each provided repr, `struct_has_padding!` reports the
+    fn test_struct_padding() {
+        // Test that, for each provided repr, `struct_padding!` reports the
         // expected value.
         macro_rules! test {
             (#[$cfg:meta] ($($ts:ty),*) => $expect:expr) => {{
                 #[$cfg]
-                struct Test($(#[allow(dead_code)] $ts),*);
-                assert_eq!(struct_has_padding!(Test, [$($ts),*]), $expect);
+                #[allow(dead_code)]
+                struct Test($($ts),*);
+                assert_eq!(struct_padding!(Test, None::<NonZeroUsize>, None::<NonZeroUsize>, [$($ts),*]), $expect);
             }};
             (#[$cfg:meta] $(#[$cfgs:meta])* ($($ts:ty),*) => $expect:expr) => {
                 test!(#[$cfg] ($($ts),*) => $expect);
@@ -1003,30 +1172,66 @@ mod tests {
             };
         }
 
-        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] () => false);
-        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] (u8) => false);
-        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] (u8, ()) => false);
-        test!(#[repr(C)] #[repr(packed)] (u8, u8) => false);
+        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] () => 0);
+        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] (u8) => 0);
+        test!(#[repr(C)] #[repr(transparent)] #[repr(packed)] (u8, ()) => 0);
+        test!(#[repr(C)] #[repr(packed)] (u8, u8) => 0);
 
-        test!(#[repr(C)] (u8, AU64) => true);
+        test!(#[repr(C)] (u8, AU64) => 7);
         // Rust won't let you put `#[repr(packed)]` on a type which contains a
         // `#[repr(align(n > 1))]` type (`AU64`), so we have to use `u64` here.
         // It's not ideal, but it definitely has align > 1 on /some/ of our CI
         // targets, and this isn't a particularly complex macro we're testing
         // anyway.
-        test!(#[repr(packed)] (u8, u64) => false);
+        test!(#[repr(packed)] (u8, u64) => 0);
     }
 
     #[test]
-    fn test_union_has_padding() {
-        // Test that, for each provided repr, `union_has_padding!` reports the
+    fn test_repr_c_struct_padding() {
+        // Test that, for each provided repr, `repr_c_struct_padding!` reports
+        // the expected value.
+        macro_rules! test {
+            (($($ts:tt),*) => $expect:expr) => {{
+                #[repr(C)]
+                #[allow(dead_code)]
+                struct Test($($ts),*);
+                assert_eq!(repr_c_struct_has_padding!(Test, None::<NonZeroUsize>, None::<NonZeroUsize>, [$($ts),*]), $expect);
+            }};
+        }
+
+        // Test static padding
+        test!(() => false);
+        test!(([u8]) => false);
+        test!((u8) => false);
+        test!((u8, [u8]) => false);
+        test!((u8, ()) => false);
+        test!((u8, (), [u8]) => false);
+        test!((u8, u8) => false);
+        test!((u8, u8, [u8]) => false);
+
+        test!((u8, AU64) => true);
+        test!((u8, AU64, [u8]) => true);
+
+        // Test dynamic padding
+        test!((AU64, [AU64]) => false);
+        test!((u8, [AU64]) => true);
+
+        #[repr(align(4))]
+        struct AU32(#[allow(unused)] u32);
+        test!((AU64, [AU64]) => false);
+        test!((AU64, [AU32]) => true);
+    }
+
+    #[test]
+    fn test_union_padding() {
+        // Test that, for each provided repr, `union_padding!` reports the
         // expected value.
         macro_rules! test {
             (#[$cfg:meta] {$($fs:ident: $ts:ty),*} => $expect:expr) => {{
                 #[$cfg]
                 #[allow(unused)] // fields are never read
                 union Test{ $($fs: $ts),* }
-                assert_eq!(union_has_padding!(Test, [$($ts),*]), $expect);
+                assert_eq!(union_padding!(Test, None::<NonZeroUsize>, None::<usize>, [$($ts),*]), $expect);
             }};
             (#[$cfg:meta] $(#[$cfgs:meta])* {$($fs:ident: $ts:ty),*} => $expect:expr) => {
                 test!(#[$cfg] {$($fs: $ts),*} => $expect);
@@ -1034,19 +1239,19 @@ mod tests {
             };
         }
 
-        test!(#[repr(C)] #[repr(packed)] {a: u8} => false);
-        test!(#[repr(C)] #[repr(packed)] {a: u8, b: u8} => false);
+        test!(#[repr(C)] #[repr(packed)] {a: u8} => 0);
+        test!(#[repr(C)] #[repr(packed)] {a: u8, b: u8} => 0);
 
         // Rust won't let you put `#[repr(packed)]` on a type which contains a
         // `#[repr(align(n > 1))]` type (`AU64`), so we have to use `u64` here.
         // It's not ideal, but it definitely has align > 1 on /some/ of our CI
         // targets, and this isn't a particularly complex macro we're testing
         // anyway.
-        test!(#[repr(C)] #[repr(packed)] {a: u8, b: u64} => true);
+        test!(#[repr(C)] #[repr(packed)] {a: u8, b: u64} => 7);
     }
 
     #[test]
-    fn test_enum_has_padding() {
+    fn test_enum_padding() {
         // Test that, for each provided repr, `enum_has_padding!` reports the
         // expected value.
         macro_rules! test {
@@ -1065,7 +1270,7 @@ mod tests {
                     $($vs ($($ts),*),)*
                 }
                 assert_eq!(
-                    enum_has_padding!(Test, $disc, $([$($ts),*]),*),
+                    enum_padding!(Test, None::<NonZeroUsize>, None::<NonZeroUsize>, $disc, $([$($ts),*]),*),
                     $expect
                 );
             }};
@@ -1081,41 +1286,41 @@ mod tests {
 
         test!(#[repr(u8)] #[repr(C)] {
             A(u8),
-        } => false);
+        } => 0);
         test!(#[repr(u16)] #[repr(C)] {
             A(u8, u8),
             B(U16),
-        } => false);
+        } => 0);
         test!(#[repr(u32)] #[repr(C)] {
             A(u8, u8, u8, u8),
             B(U16, u8, u8),
             C(u8, u8, U16),
             D(U16, U16),
             E(U32),
-        } => false);
+        } => 0);
 
         // `repr(int)` can pack the discriminant more efficiently
         test!(#[repr(u8)] {
             A(u8, U16),
-        } => false);
+        } => 0);
         test!(#[repr(u8)] {
             A(u8, U16, U32),
-        } => false);
+        } => 0);
 
         // `repr(C)` cannot
         test!(#[repr(u8, C)] {
             A(u8, U16),
-        } => true);
+        } => 2);
         test!(#[repr(u8, C)] {
             A(u8, u8, u8, U32),
-        } => true);
+        } => 4);
 
         // And field ordering can always cause problems
         test!(#[repr(u8)] #[repr(C)] {
             A(U16, u8),
-        } => true);
+        } => 2);
         test!(#[repr(u8)] #[repr(C)] {
             A(U32, u8, u8, u8),
-        } => true);
+        } => 4);
     }
 }

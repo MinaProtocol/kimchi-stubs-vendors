@@ -11,9 +11,9 @@
 
 [package]
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.88"
 name = "serde_with_macros"
-version = "3.12.0"
+version = "3.22.0"
 authors = ["Jonas Bushart"]
 build = false
 include = [
@@ -44,27 +44,45 @@ repository = "https://github.com/jonasbb/serde_with/"
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = [
+    "--cfg=docsrs",
+    "-Zunstable-options",
+    "--generate-link-to-definition",
+    "--generate-macro-expansion",
+    "--extern-html-root-url=core=https://doc.rust-lang.org",
+    "--extern-html-root-url=alloc=https://doc.rust-lang.org",
+    "--extern-html-root-url=std=https://doc.rust-lang.org",
+    "--extern-html-root-url=proc_macro=https://doc.rust-lang.org",
+]
 
 [package.metadata.release]
 tag = false
 
 [[package.metadata.release.pre-release-replacements]]
 file = "CHANGELOG.md"
+search = '\[Unreleased\]'
 replace = """
 [Unreleased]
 
 ## [{{version}}] - {{date}}"""
-search = '\[Unreleased\]'
 
 [[package.metadata.release.pre-release-replacements]]
 file = "src/lib.rs"
-replace = "https://docs.rs/serde_with/{{version}}/"
 search = 'https://docs\.rs/serde_with/[\d.]+/'
+replace = "https://docs.rs/serde_with/{{version}}/"
 
 [[package.metadata.release.pre-release-replacements]]
 file = "src/lib.rs"
-replace = "https://docs.rs/serde_with_macros/{{version}}/"
 search = 'https://docs\.rs/serde_with_macros/[\d.]+/'
+replace = "https://docs.rs/serde_with_macros/{{version}}/"
+
+[badges.maintenance]
+status = "actively-developed"
+
+[features]
+schemars_0_8 = []
+schemars_0_9 = []
+schemars_1 = []
 
 [lib]
 name = "serde_with_macros"
@@ -96,7 +114,7 @@ name = "version_numbers"
 path = "tests/version_numbers.rs"
 
 [dependencies.darling]
-version = "0.20.0"
+version = "0.23.0"
 
 [dependencies.proc-macro2]
 version = "1.0.1"
@@ -113,13 +131,21 @@ features = [
 ]
 
 [dev-dependencies.expect-test]
-version = "1.5.0"
+version = "1.5.1"
+
+[dev-dependencies.glob]
+version = "0.3.3"
 
 [dev-dependencies.pretty_assertions]
 version = "1.4.0"
 
+[dev-dependencies.regex]
+version = "1.12.1"
+features = ["std"]
+default-features = false
+
 [dev-dependencies.rustversion]
-version = "1.0.0"
+version = "1.0.22"
 
 [dev-dependencies.serde]
 version = "1.0.152"
@@ -129,20 +155,12 @@ features = ["derive"]
 version = "1.0.25"
 
 [dev-dependencies.trybuild]
-version = "1.0.80"
-
-[dev-dependencies.version-sync]
-version = "0.9.1"
-
-[features]
-schemars_0_8 = []
-
-[badges.maintenance]
-status = "actively-developed"
+version = "1.0.111"
 
 [lints.clippy]
 cloned_instead_of_copied = "warn"
 default_trait_access = "warn"
+disallowed_methods = "warn"
 doc_markdown = "warn"
 explicit_auto_deref = "allow"
 manual-unwrap-or-default = "allow"
@@ -155,6 +173,7 @@ trivial_casts = "warn"
 trivial_numeric_casts = "warn"
 unused_extern_crates = "warn"
 unused_import_braces = "warn"
+unused_qualifications = "warn"
 variant_size_differences = "warn"
 
 [lints.rust.rust_2018_idioms]

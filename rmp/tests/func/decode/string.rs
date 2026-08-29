@@ -176,7 +176,7 @@ fn from_str_strfix_invalid_utf8() {
     match read_str(&mut cur, out) {
         Err(DecodeStringError::InvalidUtf8(raw, _)) => {
             assert_eq!(&[0xc3, 0x28], raw);
-        }
+        },
         other => panic!("unexpected result: {other:?}"),
     }
 
@@ -214,7 +214,10 @@ fn from_str_strfix_decode_from_slice_with_trailing_bytes() {
         0xaa, 0x6c, 0x65, 0x20, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x01, 0x02, 0x03,
     ];
 
-    assert_eq!(("le message", &[0x01, 0x02, 0x03][..]), read_str_from_slice(&buf).unwrap());
+    assert_eq!(
+        ("le message", &[0x01, 0x02, 0x03][..]),
+        read_str_from_slice(&buf).unwrap()
+    );
 }
 
 #[test]
@@ -233,7 +236,7 @@ fn example_process_sequence_of_strings() {
             Ok((chunk, tail)) => {
                 chunks.push(chunk);
                 unparsed = tail;
-            }
+            },
             Err(..) => break,
         }
     }

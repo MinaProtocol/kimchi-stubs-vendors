@@ -10,16 +10,22 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
-rust-version = "1.60"
+edition = "2024"
+rust-version = "1.89"
 name = "enum-ordinalize"
-version = "4.3.0"
+version = "4.4.2"
+build = false
 include = [
     "src/**/*",
     "Cargo.toml",
     "README.md",
     "LICENSE",
 ]
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
 description = "This library enables enums to not only obtain the ordinal values of their variants but also allows for the construction of enums from an ordinal value."
 homepage = "https://magiclen.org/enum-ordinalize"
 readme = "README.md"
@@ -43,16 +49,19 @@ rustdoc-args = [
     "docsrs",
 ]
 
-[dependencies.enum-ordinalize-derive]
-version = "4.3"
-optional = true
-default-features = false
-
 [features]
 default = [
     "derive",
     "traits",
 ]
 derive = ["dep:enum-ordinalize-derive"]
-nightly-test = []
 traits = ["enum-ordinalize-derive?/traits"]
+
+[lib]
+name = "enum_ordinalize"
+path = "src/lib.rs"
+
+[dependencies.enum-ordinalize-derive]
+version = "4.4.1"
+optional = true
+default-features = false

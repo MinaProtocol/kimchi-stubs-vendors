@@ -84,41 +84,45 @@ impl ByteBuf {
     #[inline]
     #[must_use]
     pub fn new() -> Self {
-        ByteBuf { bytes: Vec::new() }
+        Self { bytes: Vec::new() }
     }
+
     /// Construct a new buffer with the specified capacity
     ///
     /// See [`Vec::with_capacity`] for details
     #[inline]
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
-        ByteBuf {
-            bytes: Vec::with_capacity(capacity),
-        }
+        Self { bytes: Vec::with_capacity(capacity) }
     }
+
     /// Unwrap the underlying buffer of this vector
     #[inline]
     #[must_use]
     pub fn into_vec(self) -> Vec<u8> {
         self.bytes
     }
+
     /// Wrap the specified vector as a [`ByteBuf`]
     #[inline]
     #[must_use]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
-        ByteBuf { bytes }
+        Self { bytes }
     }
+
     /// Get a reference to this type as a [Vec]
     #[inline]
     #[must_use]
     pub fn as_vec(&self) -> &Vec<u8> {
         &self.bytes
     }
+
     /// Get a mutable reference to this type as a [Vec]
     #[inline]
     pub fn as_mut_vec(&mut self) -> &mut Vec<u8> {
         &mut self.bytes
     }
+
     /// Get a reference to this type as a slice of bytes (`&[u8]`)
     #[inline]
     #[must_use]
@@ -152,7 +156,7 @@ impl From<ByteBuf> for Vec<u8> {
 impl From<Vec<u8>> for ByteBuf {
     #[inline]
     fn from(bytes: Vec<u8>) -> Self {
-        ByteBuf { bytes }
+        Self { bytes }
     }
 }
 
